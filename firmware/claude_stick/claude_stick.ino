@@ -191,6 +191,7 @@ static void pin_lock_tick();
 static void ui_wifi();
 static void ui_token();
 static void ui_loading(const char *sub);
+static void ui_error();
 static void ui_main();
 static void ui_settings();
 static void ui_accounts();
@@ -890,6 +891,19 @@ static void ui_message(const char *title, const char *sub, uint32_t color) {
     lv_obj_align(s, LV_ALIGN_CENTER, 0, 20);
   }
 }
+// Tela de falha do primeiro load. Toque em qualquer lugar tenta de novo — e o
+// loop() ainda re-tenta sozinho a cada 15s (falha de rede/NTP costuma passar).
+static void ui_error() {
+  ui_message(TRS("Falha", "Failed"),
+             g_usage.error[0] ? g_usage.error : TRS("sem dados", "no data"), C_BAD);
+  lv_obj_t *scr = lv_screen_active();
+  lv_obj_t *h = mklabel(scr, TRS("toque para tentar de novo", "tap to retry"),
+                        &lv_font_montserrat_14, C_MUTED);
+  lv_obj_align(h, LV_ALIGN_CENTER, 0, 56);
+  lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(scr, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_LOADING);
+}
+
 static void ui_loading(const char *sub) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_t *mark = build_claude_mark(scr);
@@ -2454,8 +2468,7 @@ static void render_state() {
     case ST_ACCOUNTS:  ui_accounts(); break;
     case ST_ACCT_NAME: ui_account_name(); break;
     case ST_ABOUT:     ui_about(); break;
-    case ST_ERROR:     ui_message(TRS("Falha", "Failed"),
-                                  g_usage.error[0] ? g_usage.error : TRS("sem dados", "no data"), C_BAD); break;
+    case ST_ERROR:     ui_error(); break;
     default: break;
   }
 }
@@ -2471,6 +2484,22 @@ static void ensure_time() {
   Serial.println("[NTP] sync iniciado");
 }
 
+// A validacao do certificado TLS compara as datas do cert com o relogio do
+// device. Disparar o fetch antes do NTP chegar devolve http_-1 (handshake
+// recusado), e ate a v2.3 isso jogava o boot direto na tela de erro sem volta.
+static bool wait_for_time(uint32_t timeoutMs) {
+  ensure_time();
+  uint32_t t0 = millis();
+  while (time(nullptr) < 1000000000L && millis() - t0 < timeoutMs) {
+    lv_task_handler();
+    delay(50);
+  }
+  bool ok = time(nullptr) > 1000000000L;
+  Serial.printf("[NTP] relogio %s em %ums\n", ok ? "pronto" : "SEM SYNC",
+                (unsigned)(millis() - t0));
+  return ok;
+}
+
 // Sonda o próximo modelo da rotação.
 static void probe_next_model() {
   int mi = g_probeIdx % NMODELS;
@@ -2481,7 +2510,7 @@ static void probe_next_model() {
 
 // Primeiro load (mostra a tela de carregamento). Vai p/ ST_MAIN ou ST_ERROR.
 static void do_refresh() {
-  ensure_time();
+  wait_for_time(10000);
   bool ok = fetchUsage(g_token, g_usage);
   if (ok) {
     fetchModelStatus(g_status); g_lastOkMs = millis(); g_lastFetchOk = true;
@@ -2623,6 +2652,13 @@ void loop() {
   if (g_state == ST_PIN) {
     static uint32_t lastLock = 0;
     if (millis() - lastLock > 250) { lastLock = millis(); pin_lock_tick(); }
+  }
+
+  // Falha no primeiro load nao pode ser terminal: o poll automatico so roda em
+  // ST_MAIN, entao sem isto a placa fica presa na tela de erro ate o reset.
+  if (g_state == ST_ERROR && millis() - g_lastPollMs > 15000) {
+    g_lastPollMs = millis();
+    request_state(ST_LOADING);
   }
 
   // Atualização viva: contadores (1s), barra de refresh (250ms), mascotes,
