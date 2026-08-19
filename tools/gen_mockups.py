@@ -240,6 +240,58 @@ def mock_ritmo():
     return im
 
 
+# ---------------- dialog de incidente (sobre a tela Agora) ----------------
+# Espelha show_incident(): scrim de 210/255 sobre a tela toda, caixa 420x206
+# centrada com borda na cor da gravidade, Clawd "morto" de 104 px na esquerda e
+# a coluna titulo f20 -> chip -> modelos f16 -> link f12 -> botao 140x44.
+def warn_tri(d, cx, cy, color):
+    d.polygon([(cx, cy - 11), (cx + 12, cy + 9), (cx - 12, cy + 9)], fill=hexrgb(color))
+    d.rectangle((cx - 1, cy - 5, cx + 1, cy + 3), fill=hexrgb(BG))
+    d.rectangle((cx - 1, cy + 5, cx + 1, cy + 7), fill=hexrgb(BG))
+
+
+def mock_incidente(sev=("GRAVE", WARN), models="Opus 4.6 \u2022 Sonnet 4.5"):
+    """sev = (palavra do chip, cor). O firmware usa LEVE/GRAVE/CRITICO."""
+    word, col = sev
+    im = mock_agora()
+    scrim = Image.new("RGBA", (480, 320), hexrgb(BG) + (210,))
+    im.alpha_composite(scrim)
+    d = ImageDraw.Draw(im)
+
+    # caixa 420x206 centrada (pad 18 -> area util 384x170 em 48,75)
+    d.rounded_rectangle((30, 57, 450, 263), 18, fill=hexrgb(SURF), outline=hexrgb(col), width=2)
+
+    dead = Image.open(os.path.join(BRAND, "clawd-dead.png")).convert("RGBA")
+    dead = dead.crop(dead.getbbox())
+    dh = round(dead.height * 104 / dead.width)
+    dead = dead.resize((104, dh), Image.LANCZOS)
+    im.alpha_composite(dead, (48, 75 + (170 - dh) // 2))
+
+    tx, tw = 48 + 104 + 18, 384 - (104 + 18)
+    cx = tx + tw / 2
+    y = 75 + 4
+    title = "INCIDENTE ATIVO"
+    wt = d.textlength(title, font=F(20))
+    x0 = cx - (wt + 60) / 2
+    warn_tri(d, x0 + 12, y + 11, col)
+    d.text((x0 + 30, y), title, font=F(20), fill=hexrgb(col))
+    warn_tri(d, x0 + wt + 48, y + 11, col)
+    y += 30
+
+    wc = d.textlength(word, font=F(12)) + 20
+    chip(d, cx - wc / 2, y, word, col)
+    y += 32
+
+    d.text((cx, y), models, font=F(16), fill=hexrgb(TEXT), anchor="ma")
+    y += 24
+
+    d.text((cx, y), "veja status.claude.com", font=F(12), fill=hexrgb(MUTED), anchor="ma")
+
+    d.rounded_rectangle((cx - 70, 201, cx + 70, 245), 10, fill=hexrgb(SURF2))
+    d.text((cx, 223), "OK", font=F(16), fill=hexrgb(TEXT), anchor="mm")
+    return im
+
+
 # ---------------- tela: Ajustes -> Contas ----------------
 # Espelha ui_accounts() do firmware: titulo em (14,10) f20; botao Voltar 100x32
 # no canto sup. direito; lista em (8,44) 464x240, linhas de 444x44 com pad_row 8.
@@ -318,6 +370,7 @@ def main():
     outs = {
         "mock-agora.png": mock_agora(),
         "mock-modelos.png": mock_modelos(),
+        "mock-incidente.png": mock_incidente(),
         "mock-janela5h.png": mock_janela(),
         "mock-ritmo.png": mock_ritmo(),
         "mock-contas.png": mock_contas(),

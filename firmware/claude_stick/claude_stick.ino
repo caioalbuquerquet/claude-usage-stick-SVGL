@@ -4,8 +4,9 @@
  *
  * Dashboard do rate-limit do Claude Code (janelas 5h e 7d, headers unified-*),
  * sonda real por modelo (latencia + HTTP), projecao de esgotamento da janela
- * 5h e ritmo de uso por hora com filtro de periodo. Token OAuth digitado na
- * tela e guardado cifrado (AES-256-GCM, chave derivada de um PIN de 4 digitos).
+ * 5h e ritmo de uso por hora com filtro de periodo. Incidentes do
+ * status.claude.com viram dialog na tela inicial. Token OAuth digitado na tela
+ * e guardado cifrado (AES-256-GCM, chave derivada de um PIN de 4 digitos).
  *
  * Tokens por sessao: a API nao expoe contagem para conta de assinatura; um
  * bridge opcional (tools/token_bridge.py) soma os transcripts locais do
@@ -33,6 +34,7 @@
 #include "crypto.h"
 #include "accounts.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
+#include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
 
 // ---- Paleta (escuro, minimalista; acento coral do Claude) ----
 #define C_BG       0x0F0F12
@@ -48,6 +50,7 @@
 #define C_OK       0x4ADE80
 #define C_WARN     0xFBBF24
 #define C_BAD      0xF87171
+#define C_SEV_MAJOR 0xFB923C   // laranja: gravidade "major" do status.claude.com
 
 // ---- Idioma (0 = portugues, 1 = english; Ajustes -> NVS "lang") ----
 static uint8_t g_lang = 0;
@@ -72,7 +75,7 @@ static void request_state(State s) { g_pending = s; g_dirty = true; }
 
 // ---- Dados ----
 static UsageData   g_usage = {};
-static ModelStatus g_status = {true, true, true, true, false};
+static ModelStatus g_status = {true, true, true, true, false, SEV_NONE};
 
 // ---- Modelos sondados (1 por ciclo, rotativo) ----
 #define NMODELS 4
@@ -163,10 +166,10 @@ struct DashUI {
   lv_obj_t *refBar;
   // agora (overview + reset mesclados)
   lv_obj_t *agChip, *agPct5, *agCd5, *agAt5;
-  lv_obj_t *agPct7, *agCd7, *agAt7, *agTok;
+  lv_obj_t *agPct7, *agCd7, *agAt7, *agTok, *agProj;
   lv_obj_t *seg5[NSEG], *seg7[NSEG];  // medidores segmentados
   // modelos
-  lv_obj_t *mChip[NMODELS], *incident;
+  lv_obj_t *mChip[NMODELS];
   // tendência da janela 5h (linhas custom)
   lv_obj_t *trHist, *trProj, *trDot, *trCap, *trT0, *trT1;
   // ritmo por hora
@@ -1356,9 +1359,6 @@ static void build_tile_models(lv_obj_t *t) {
   tstatic(t, TRS("sonda real na API \xE2\x80\xA2 1 modelo por ciclo",
                  "live API probe \xE2\x80\xA2 1 model per cycle"),
           &lv_font_montserrat_12, C_FAINT, 14, 170);
-  g_ui.incident = tlabel(t, &lv_font_montserrat_14, C_MUTED, 14, 194);
-  lv_obj_set_width(g_ui.incident, 452);
-  lv_label_set_long_mode(g_ui.incident, LV_LABEL_LONG_WRAP);
 }
 // Tile 2 — JANELA 5H: histórico + projeção pontilhada até esgotar.
 #define TR_X0 12
@@ -1852,6 +1852,166 @@ static void moment_tick() {
   if (millis() > g_momentUntil) moment_close();
 }
 
+// ============================================================
+// Dialog de incidente — status.claude.com reportando problema nao resolvido
+// Modal em lv_layer_top: escurece a tela inicial, some no toque. So volta a
+// aparecer depois que o incidente e resolvido e um novo surge (g_incAck).
+// ============================================================
+static lv_obj_t *g_incDlg = nullptr;   // overlay vivo (nullptr = fechado)
+static bool g_incAck = false;          // usuario ja dispensou o incidente atual
+static uint8_t g_incSev = 0xFF;        // severidade desenhada no dialog atual
+static uint8_t g_incMask = 0xFF;       // modelos afetados desenhados no dialog
+
+// Bitmask dos modelos citados pelos incidentes abertos (Haiku, Sonnet, Opus,
+// Fable). Vem do mesmo scan de palavra-chave que decide se o dialog aparece.
+static uint8_t affected_mask() {
+  return (uint8_t)((!g_status.haikuUp)       | (!g_status.sonnetUp) << 1 |
+                   (!g_status.opusUp)   << 2 | (!g_status.fableUp)  << 3);
+}
+
+// "Opus 4.6 \u2022 Sonnet 4.5". Os quatro afetados viram "Todos"; false = nenhum
+// modelo citado, ai a linha some.
+//
+// A versao so entra com ate 2 modelos: com 3, "Haiku 4.5 \u2022 Sonnet 4.5 \u2022 Opus 4.6"
+// passa dos 262 px da coluna e o LONG_DOT cortaria justamente o ultimo nome.
+static bool affected_models(char *out, size_t sz) {
+  static const char *NAMES[4] = {"Haiku", "Sonnet", "Opus", "Fable"};
+  uint8_t mask = affected_mask();
+  out[0] = 0;
+  if (mask == 0x0F) { strlcpy(out, TRS("Todos", "All"), sz); return true; }
+
+  int total = 0;
+  for (int i = 0; i < 4; i++) if (mask & (1 << i)) total++;
+  bool withVer = (total <= 2);
+
+  int n = 0;
+  for (int i = 0; i < 4; i++) {
+    if (!(mask & (1 << i))) continue;
+    if (n++) strlcat(out, " \xE2\x80\xA2 ", sz);
+    strlcat(out, NAMES[i], sz);
+    if (withVer && g_status.version[i][0]) {
+      strlcat(out, " ", sz);
+      strlcat(out, g_status.version[i], sz);
+    }
+  }
+  return n > 0;
+}
+
+// Palavra do "impact" do Statuspage. Todo incidente alerta: quando nao ha
+// gravidade utilizavel o chip diz isso na cara, em vez de sumir e deixar o
+// modal parecendo generico.
+static const char *severity_label(uint8_t sev) {
+  switch (sev) {
+    case SEV_CRITICAL: return TRS("CRITICO", "CRITICAL");
+    case SEV_MAJOR:    return TRS("GRAVE", "MAJOR");
+    case SEV_MINOR:    return TRS("LEVE", "MINOR");
+    default:           return TRS("IMPACTO NAO DECLARADO", "IMPACT NOT DECLARED");
+  }
+}
+
+// Cor do dialog por gravidade reportada no "impact" do status.claude.com.
+static uint32_t severity_color(uint8_t sev) {
+  return sev >= SEV_CRITICAL ? C_BAD
+       : sev == SEV_MAJOR    ? C_SEV_MAJOR
+                             : C_WARN;   // minor / desconhecido
+}
+
+static void incident_close() {
+  if (!g_incDlg) return;
+  lv_obj_delete(g_incDlg);
+  g_incDlg = nullptr;
+}
+static void incident_dismiss_cb(lv_event_t *e) { (void)e; g_incAck = true; incident_close(); }
+
+static void show_incident() {
+  incident_close();
+  g_incSev = g_status.severity;
+  g_incMask = affected_mask();
+  uint32_t sevCol = severity_color(g_incSev);
+
+  lv_obj_t *s = lv_obj_create(lv_layer_top());
+  g_incDlg = s;
+  lv_obj_set_pos(s, 0, 0); lv_obj_set_size(s, 480, 320);
+  lv_obj_set_style_bg_color(s, lv_color_hex(C_BG), 0);
+  lv_obj_set_style_bg_opa(s, 210, 0);
+  lv_obj_set_style_border_width(s, 0, 0);
+  lv_obj_set_style_radius(s, 0, 0);
+  lv_obj_set_style_pad_all(s, 0, 0);
+  lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(s, incident_dismiss_cb, LV_EVENT_CLICKED, NULL);
+
+  // Caixa 420x206 (pad 18 -> area util 384x170): Clawd "morto" na esquerda,
+  // coluna com titulo + chip de gravidade + modelos afetados + link + botao.
+  lv_obj_t *box = lv_obj_create(s);
+  lv_obj_set_size(box, 420, 206);
+  lv_obj_center(box);
+  lv_obj_set_style_bg_color(box, lv_color_hex(C_SURFACE), 0);
+  lv_obj_set_style_radius(box, 18, 0);
+  lv_obj_set_style_border_width(box, 2, 0);
+  lv_obj_set_style_border_color(box, lv_color_hex(sevCol), 0);
+  lv_obj_set_style_pad_all(box, 18, 0);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *dead = lv_image_create(box);
+  lv_image_set_src(dead, &img_clawd_dead);
+  lv_obj_align(dead, LV_ALIGN_LEFT_MID, 0, 0);
+
+  const int TX = CLAWD_DEAD_W + 18;          // inicio da coluna de texto
+  const int TW = 384 - TX;                   // largura util dessa coluna
+
+  lv_obj_t *t = mklabel(box, TRS(LV_SYMBOL_WARNING "  INCIDENTE ATIVO  " LV_SYMBOL_WARNING,
+                                 LV_SYMBOL_WARNING "  ACTIVE INCIDENT  " LV_SYMBOL_WARNING),
+                        &lv_font_montserrat_20, sevCol);
+  lv_obj_set_width(t, TW);
+  lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+  // empilhamento sequencial: chip e modelos somem quando nao ha o que dizer,
+  // e o que sobra sobe junto em vez de deixar buraco.
+  int y = 4;
+  lv_obj_align(t, LV_ALIGN_TOP_LEFT, TX, y);
+  y += 30;
+
+  lv_obj_t *chip = mkchip(box, 0, 0);
+  set_chip(chip, severity_label(g_incSev), sevCol);
+  lv_obj_update_layout(chip);
+  lv_obj_align(chip, LV_ALIGN_TOP_LEFT, TX + (TW - lv_obj_get_width(chip)) / 2, y);
+  y += 32;
+
+  char mods[80];
+  if (affected_models(mods, sizeof(mods))) {
+    lv_obj_t *ml = mklabel(box, mods, &lv_font_montserrat_16, C_TEXT);
+    lv_obj_set_width(ml, TW);
+    lv_label_set_long_mode(ml, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(ml, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(ml, LV_ALIGN_TOP_LEFT, TX, y);
+    y += 24;
+  }
+
+  lv_obj_t *m = mklabel(box, TRS("veja status.claude.com", "see status.claude.com"),
+                        &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_width(m, TW);
+  lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(m, LV_ALIGN_TOP_LEFT, TX, y);
+
+  lv_obj_t *ok = mkbtn(box, "OK", &lv_font_montserrat_16, C_SURFACE2, C_TEXT);
+  lv_obj_set_size(ok, 140, 44);
+  lv_obj_align(ok, LV_ALIGN_BOTTOM_LEFT, TX + (TW - 140) / 2, 0);
+  lv_obj_add_event_cb(ok, incident_dismiss_cb, LV_EVENT_CLICKED, NULL);
+}
+
+// Abre/fecha o dialog conforme a ultima leitura do status.claude.com.
+static void incident_sync() {
+  if (g_state != ST_MAIN) return;
+  bool any = g_status.ok &&
+             !(g_status.haikuUp && g_status.sonnetUp && g_status.opusUp && g_status.fableUp);
+  if (!any) { g_incAck = false; g_incSev = g_incMask = 0xFF; incident_close(); return; }
+
+  uint8_t sev = g_status.severity, mask = affected_mask();
+  if (g_incDlg && (sev != g_incSev || mask != g_incMask)) incident_close();   // redesenha
+  else if (g_incAck && g_incSev != 0xFF && sev > g_incSev) g_incAck = false;  // escalou
+  if (!g_incAck && !g_incDlg) show_incident();
+}
+
 // Preenche todos os valores vindos do fetch (sem rebuild de tela).
 static void refresh_ui_values() {
   if (g_state != ST_MAIN || !g_ui.agPct5) return;
@@ -1868,7 +2028,7 @@ static void refresh_ui_values() {
   set_chip(g_ui.agChip, overall_label(g_usage.statusOverall), status_color(g_usage.statusOverall));
   update_tok_row();
 
-  // Modelos: chips de sonda + incidente
+  // Modelos: chips de sonda
   for (int i = 0; i < NMODELS; i++) {
     if (!g_ui.mChip[i]) continue;
     char txt[16]; uint32_t col;
@@ -1878,16 +2038,8 @@ static void refresh_ui_values() {
     static const int CENTERS[NMODELS] = {60, 180, 300, 420};
     lv_obj_set_x(g_ui.mChip[i], CENTERS[i] - lv_obj_get_width(g_ui.mChip[i]) / 2);
   }
-  if (g_ui.incident) {
-    bool any = !(g_status.haikuUp && g_status.sonnetUp && g_status.opusUp && g_status.fableUp);
-    lv_label_set_text(g_ui.incident,
-        !g_status.ok ? TRS("status.claude.com: sem dados", "status.claude.com: no data")
-        : (any ? TRS("Incidente ativo \xE2\x80\xA2 veja status.claude.com",
-                     "Active incident \xE2\x80\xA2 see status.claude.com")
-               : TRS("status.claude.com: OK \xE2\x80\xA2 sem incidentes",
-                     "status.claude.com: OK \xE2\x80\xA2 no incidents")));
-    lv_obj_set_style_text_color(g_ui.incident, lv_color_hex(any ? C_WARN : C_FAINT), 0);
-  }
+
+  incident_sync();
 
   trend_redraw();
   heat_redraw();
@@ -2443,6 +2595,7 @@ static void render_state() {
   stop_web();                                 // cada tela sobe o servidor que precisa
   moment_close();                             // overlay vive em lv_layer_top
   lv_obj_clean(lv_layer_top());
+  g_incDlg = nullptr;                         // dialog de incidente idem
   // invalida ponteiros vivos antes de destruir a tela antiga
   memset(&g_ui, 0, sizeof(g_ui));
   g_mascN = 0;
@@ -2707,7 +2860,7 @@ void loop() {
         }
       }
     }
-    if (g_slideSec > 0 && g_ui.tv && !g_refreshing && !g_mo.scrim &&
+    if (g_slideSec > 0 && g_ui.tv && !g_refreshing && !g_mo.scrim && !g_incDlg &&
         now - g_lastTouchMs > 10000 && now - g_lastSlideMs > (uint32_t)g_slideSec * 1000) {
       g_lastSlideMs = now;
       int next = (g_curTile + 1) % NTILES;
