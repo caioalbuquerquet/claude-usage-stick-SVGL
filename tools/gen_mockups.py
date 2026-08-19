@@ -130,15 +130,16 @@ def mock_agora():
     header(im, d)
     for (x, title, pct, cd, at) in ((8, "5 HORAS", 41, "1h 40m", "RESETA EM • qui 16:30"),
                                     (244, "SEMANA", 16, "5d 3h", "RESETA EM • ter 11:59")):
-        d.rounded_rectangle((x, 50, x + 228, 260), 18, fill=hexrgb(SURF))
+        d.rounded_rectangle((x, 50, x + 228, 248), 18, fill=hexrgb(SURF))
         d.text((x + 14, 64), title, font=F(14), fill=hexrgb(MUTED))
         d.text((x + 14, 84), f"{pct}%", font=F(48), fill=grad(pct))
         meter(d, x + 14, 146, pct)
         d.text((x + 14, 170), at, font=F(12), fill=hexrgb(FAINT))
         d.text((x + 14, 188), cd, font=F(40), fill=hexrgb(TEXT))
-    chip(d, 8, 266, "OK", OK)
-    d.text((472, 278), "tokens na janela: 1.2M entrada • 88k saida",
+    d.text((472, 258), "tokens na janela: 1.2M entrada • 88k saida",
            font=F(12), fill=hexrgb(MUTED), anchor="rm")
+    chip(d, 8, 268, "OK", OK)
+    d.text((100, 272), "NAO esgota antes do reset (62%)", font=F(14), fill=hexrgb(OK))
     dots(d, 0)
     return im
 

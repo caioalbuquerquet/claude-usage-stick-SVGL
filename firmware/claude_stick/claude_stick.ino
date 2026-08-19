@@ -1328,7 +1328,7 @@ static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
 // (verde -> vermelho conforme o uso) e countdown grande.
 static void build_win_card(lv_obj_t *t, int x, const char *title,
                            lv_obj_t **pct, lv_obj_t **seg, lv_obj_t **at, lv_obj_t **cd) {
-  lv_obj_t *c = card(t, x, 4, 228, 210);
+  lv_obj_t *c = card(t, x, 4, 228, 198);
   tstatic(c, title, &lv_font_montserrat_14, C_MUTED, 0, 0);
   *pct = tlabel(c, &lv_font_montserrat_48, C_OK, 0, 20);
   for (int i = 0; i < NSEG; i++)                    // medidor: 18 segmentos
@@ -1339,12 +1339,18 @@ static void build_win_card(lv_obj_t *t, int x, const char *title,
 static void build_tile_agora(lv_obj_t *t) {
   build_win_card(t, 8,   TRS("5 HORAS", "5 HOURS"), &g_ui.agPct5, g_ui.seg5, &g_ui.agAt5, &g_ui.agCd5);
   build_win_card(t, 244, TRS("SEMANA", "WEEK"),     &g_ui.agPct7, g_ui.seg7, &g_ui.agAt7, &g_ui.agCd7);
-  g_ui.agChip = mkchip(t, 8, 220);
-  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 130, 226);
-  lv_obj_set_width(g_ui.agTok, 342);
+  // rodape em duas linhas: tokens da sessao em cima, badge + projecao 5h embaixo.
+  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 8, 205);
+  lv_obj_set_width(g_ui.agTok, 464);
   lv_obj_set_style_text_align(g_ui.agTok, LV_TEXT_ALIGN_RIGHT, 0);
+  g_ui.agChip = mkchip(t, 8, 222);
+  // leitura da projecao da janela 5h (mesma conta do tile 1), ao lado do badge
+  g_ui.agProj = tlabel(t, &lv_font_montserrat_14, C_MUTED, 100, 226);
+  lv_obj_set_width(g_ui.agProj, 372);
+  lv_label_set_long_mode(g_ui.agProj, LV_LABEL_LONG_DOT);
 }
-// Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda + incidentes.
+// Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda real.
+// Incidentes nao aparecem mais aqui: viraram o dialog da tela inicial.
 static void build_tile_models(lv_obj_t *t) {
   static const int CENTERS[NMODELS] = {60, 180, 300, 420};
   for (int i = 0; i < NMODELS; i++) {
@@ -1524,6 +1530,14 @@ static void dash_tick() {
   set_hdr_status();
 }
 
+// Espelha a leitura da projeção da janela 5h no rodapé da tela inicial
+// (tile AGORA, ao lado do badge). Versão curta do mesmo texto do tile 1.
+static void set_ag_proj(const char *txt, uint32_t color) {
+  if (!g_ui.agProj) return;
+  lv_label_set_text(g_ui.agProj, txt);
+  lv_obj_set_style_text_color(g_ui.agProj, lv_color_hex(color), 0);
+}
+
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
 static void trend_redraw() {
   if (!g_ui.trHist) return;
@@ -1537,6 +1551,7 @@ static void trend_redraw() {
     lv_obj_add_flag(g_ui.trDot, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_ui.trCap, TRS("Aguardando dados da janela...", "Waiting for window data..."));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
+    set_ag_proj(TRS("Aguardando dados...", "Waiting for data..."), C_MUTED);
     return;
   }
   uint32_t ws = we - 5 * 3600;
@@ -1574,6 +1589,7 @@ static void trend_redraw() {
     lv_label_set_text(g_ui.trCap, TRS("Coletando dados... (~alguns minutos)",
                                       "Collecting data... (~a few minutes)"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
+    set_ag_proj(TRS("Coletando dados...", "Collecting data..."), C_MUTED);
     return;
   }
 
@@ -1600,6 +1616,9 @@ static void trend_redraw() {
                                "Window exhausted \xE2\x80\xA2 resets in %s"), e);
     lv_label_set_text(g_ui.trCap, b);
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_BAD), 0);
+    snprintf(b, sizeof(b), TRS("Esgotada \xE2\x80\xA2 reseta em %s",
+                               "Exhausted \xE2\x80\xA2 resets in %s"), e);
+    set_ag_proj(b, C_BAD);
   } else if (rate > 0.02f) {
     float minsLeft = (100.0f - g_usage.h5) / rate;
     uint32_t etaT = (uint32_t)now + (uint32_t)(minsLeft * 60);
@@ -1613,6 +1632,9 @@ static void trend_redraw() {
                hm, (int)minsLeft / 60, (int)minsLeft % 60);
       lv_label_set_text(g_ui.trCap, b);
       lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(minsLeft < 60 ? C_BAD : C_WARN), 0);
+      snprintf(b, sizeof(b), TRS("Esgota as %s (em %dh%02dm)", "Runs out at %s (in %dh%02dm)"),
+               hm, (int)minsLeft / 60, (int)minsLeft % 60);
+      set_ag_proj(b, minsLeft < 60 ? C_BAD : C_WARN);
     } else {
       float endPct = g_usage.h5 + rate * ((we - (uint32_t)now) / 60.0f);
       g_trProjPts[1].x = tr_x(we, ws, we);
@@ -1622,6 +1644,10 @@ static void trend_redraw() {
                (int)(endPct + 0.5f));
       lv_label_set_text(g_ui.trCap, b);
       lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
+      snprintf(b, sizeof(b), TRS("NAO esgota antes do reset (%d%%)",
+                                 "Does NOT run out before reset (%d%%)"),
+               (int)(endPct + 0.5f));
+      set_ag_proj(b, C_OK);
     }
     lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
   } else {
@@ -1629,6 +1655,7 @@ static void trend_redraw() {
     lv_label_set_text(g_ui.trCap, TRS("Uso estavel \xE2\x80\xA2 sem risco no momento",
                                       "Stable usage \xE2\x80\xA2 no risk right now"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
+    set_ag_proj(TRS("Uso estavel \xE2\x80\xA2 sem risco", "Stable \xE2\x80\xA2 no risk"), C_OK);
   }
 }
 
