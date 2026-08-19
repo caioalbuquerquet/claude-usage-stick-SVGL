@@ -9,7 +9,7 @@ No computer. No app. No cloud.
 
 **English** · [Português](README.pt-BR.md)
 
-<img src="https://img.shields.io/badge/firmware-v2.2-D97757?style=for-the-badge" alt="firmware v2.2">
+<img src="https://img.shields.io/badge/firmware-v2.3-D97757?style=for-the-badge" alt="firmware v2.3">
 <img src="https://img.shields.io/badge/ESP32--S3-AXS15231B%20480×320-1A1A20?style=for-the-badge" alt="ESP32-S3 AXS15231B">
 <img src="https://img.shields.io/badge/LVGL-9.2.2-4ADE80?style=for-the-badge" alt="LVGL 9.2.2">
 <img src="https://img.shields.io/badge/accounts-up%20to%204-8C8C98?style=for-the-badge" alt="up to 4 accounts">
@@ -19,7 +19,7 @@ No computer. No app. No cloud.
 </div>
 
 The device queries Anthropic's API directly, reads your usage straight from the response headers,
-and renders it on a dashboard — animated **Clawd** mascots, a burn-rate projection, an hour-of-day
+and renders it on a dashboard — a burn-rate projection, an animated **Clawd**, an hour-of-day
 heatmap, reset clocks, and **up to 4 accounts** you can switch between on-screen.
 
 > 100% touch navigation (swipe ← → between screens, no physical button). Adapted from the original
@@ -64,7 +64,7 @@ If you're comfortable with a terminal, skip it and use [Build & flash](#build--f
 
 > The images below are **pixel-accurate mockups** rendered from the firmware's own layout and
 > palette (real device photos coming soon) — regenerate with `python3 tools/gen_mockups.py`. They
-> match v2.2, except that the four swipe screens do not yet show the `@label` account badge that
+> match v2.3, except that the four swipe screens do not yet show the `@label` account badge that
 > appears in the header once you add a second account.
 
 Navigate by **swiping** (the dots at the bottom show your position; the active one becomes a
@@ -78,9 +78,11 @@ next refresh — tapping it refreshes immediately.
 - Each card: large percentage and an **18-segment meter** whose lit segments (and the number)
   slide continuously from **green through amber to red** as the window fills, plus a **large live
   countdown** to the reset and the **local reset time**.
-- Bottom strip: overall **status chip** (`OK` / `ATENCAO` / `BLOQUEADO`) and, when the
-  [token bridge](#tokens-per-session-optional-bridge) is running, the **real token counts** for
-  the current 5 h window.
+- Two-line bottom strip: on top, when the [token bridge](#tokens-per-session-optional-bridge) is
+  running, the **real token counts** for the current 5 h window; below it, the overall **status
+  chip** (`OK` / `ATENCAO` / `BLOQUEADO`) next to the **5 h projection verdict** — the same math as
+  [screen 3](#3-5-hour-window-janela-de-5h), condensed: *"NAO esgota antes do reset (62%)"* in
+  green, *"Esgota as 16:40 (em 1h32m)"* in amber/red.
 
 <br clear="right">
 
@@ -91,7 +93,7 @@ next refresh — tapping it refreshes immediately.
   fed by a **real probe against the API** (one model per refresh cycle, rotating):
   `OK 0.9s` (green, with latency) · `LIMITADO` (amber, HTTP 429) · `ERRO` (red, 5xx/network) ·
   `N/D` / `--` (gray). The mascot goes gray when the model is unreachable or under incident.
-- An **incident line** from `status.claude.com` (is the problem you or Anthropic?).
+- The old incident line moved out of here: it became the [home-screen dialog](#incident-alert).
 
 <br clear="right">
 
@@ -101,7 +103,9 @@ next refresh — tapping it refreshes immediately.
 - Custom chart with the **X axis spanning exactly the current 5 h window** (start → reset).
 - Solid coral line = real usage history; **dotted line = projection** at the current burn rate.
 - Plain-language verdict, color-coded: *"At the current rate, runs out at 16:40 (in 1h32m)"*
-  (amber/red) or *"Does NOT run out before the reset (~62%)"* (green).
+  (amber/red) or *"Does NOT run out before the reset (~62%)"* (green). A short form of that same
+  verdict also sits in the [screen 1](#1-now-agora) footer, so you don't have to swipe to know
+  whether you're going to hit the ceiling.
 
 <br clear="right">
 
@@ -112,6 +116,42 @@ next refresh — tapping it refreshes immediately.
   the current hour is highlighted.
 - **Period selector** at the top: **Hoje / 7d / 30d / Tudo** (today, last 7 days, last 30 days,
   all time). Per-day history is **persisted to flash** (31 days on the device).
+
+<br clear="right">
+
+### Incident alert
+<img src="assets/mock-incidente.png" width="400" align="right" alt="Incident dialog">
+
+When `status.claude.com` reports an **unresolved incident** on any model, a modal dialog takes over
+the home screen: *"⚠ INCIDENTE ATIVO ⚠ — veja status.claude.com"*. It answers the question that
+matters the moment something stalls: **is it you or is it Anthropic?**
+
+The **severity** Statuspage reports in the incident's `impact` field becomes a **chip** below the
+title, and tints the border and title:
+
+| `impact` | chip | color |
+|---|---|---|
+| `minor` | `LEVE` | amber `#FBBF24` |
+| `major` | `GRAVE` | orange `#FB923C` |
+| `critical` | `CRITICO` | red `#F87171` |
+| `none` / missing | `IMPACTO NAO DECLARADO` | amber `#FBBF24` |
+
+**Every incident naming a model opens the dialog** — none is silently suppressed. When there's no
+usable severity (the field came back `none`, or the parser didn't find it), the chip says so
+outright instead of disappearing and leaving the modal looking generic.
+
+Below the chip come the **models named** by the incident, from the same keyword scan that decides
+whether the dialog shows at all — with the **version**, when the incident text says which
+(`Opus 4.6 • Sonnet 4.5`). With all four families affected the line collapses to **`All`**; with
+three, versions are dropped, otherwise the line overflows the 262 px column.
+
+With no model named the model line disappears — better to omit than to invent. Whatever remains
+moves up, no gap left.
+
+Tap anywhere (or `OK`) to dismiss. It **won't nag you again** for the duration of that incident —
+it only comes back if the incident is resolved and a new one shows up, **or if the severity
+escalates** (a `minor` turning `critical` re-alerts even after being dismissed). If severity changes
+while the dialog is open, it redraws in the new color. The slideshow stays paused while it's open.
 
 <br clear="right">
 
@@ -217,10 +257,13 @@ anthropic-ratelimit-unified-fallback-percentage
 anthropic-ratelimit-unified-overage-status / -overage-disabled-reason
 ```
 
-Model health combines `status.claude.com/api/v2/incidents/unresolved.json` (incidents) with a
-**per-model probe**: each refresh cycle the device sends one `max_tokens: 1` request to the next
-model in the rotation (Haiku → Sonnet → Opus → Fable) and records the HTTP code + latency. That's
-what feeds the colored status pills on the Models screen.
+Model health comes from `status.claude.com/api/v2/incidents/unresolved.json`: unresolved incidents
+name the model family in their own text, so a keyword scan is all the parsing needed
+(`status.cpp`), which also picks the highest `impact` (`minor` / `major` / `critical`) in the list. That's what fires the [incident dialog](#incident-alert) on the home screen.
+
+The **per-model probe** stays: each refresh cycle the device sends one `max_tokens: 1` POST to the
+next model in the rotation (Haiku → Sonnet → Opus → Fable) and records the HTTP code + latency.
+That's what feeds the pills on the Models screen.
 
 ### Tokens per session (optional bridge)
 
@@ -445,7 +488,7 @@ firmware/
   claude_stick/                 # the firmware (arduino-cli sketch)
     claude_stick.ino            # setup/loop, state machine, dashboard, screens
     api.cpp/.h                  # fetchUsage() — usage via API headers
-    status.cpp/.h               # fetchModelStatus() — model health
+    status.cpp/.h               # fetchModelStatus() — status.claude.com incidents
     crypto.cpp/.h               # AES-256-GCM + PIN-derived key
     accounts.cpp/.h             # account slots in NVS (multi-account)
     certs.cpp/.h                # CA bundle for HTTPS
@@ -471,7 +514,8 @@ assets/                         # screen mockups, README banners + brand assets 
 
 - **Poll interval, endpoints, PIN, timezone:** via the screen (Settings) or in `config.h`.
 - **Theme colors / layout:** top of `claude_stick.ino` (palette) and the `build_tile_*` builders.
-- **Mascots:** `build_mascot()` in `claude_stick.ino`.
+- **Mascots / threshold moments:** `show_moment()` in `claude_stick.ino`.
+- **Incident dialog:** `show_incident()` / `incident_sync()` in `claude_stick.ino`.
 
 ---
 

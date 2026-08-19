@@ -9,7 +9,7 @@ Sem computador. Sem app. Sem nuvem.
 
 [English](README.md) · **Português**
 
-<img src="https://img.shields.io/badge/firmware-v2.2-D97757?style=for-the-badge" alt="firmware v2.2">
+<img src="https://img.shields.io/badge/firmware-v2.3-D97757?style=for-the-badge" alt="firmware v2.3">
 <img src="https://img.shields.io/badge/ESP32--S3-AXS15231B%20480×320-1A1A20?style=for-the-badge" alt="ESP32-S3 AXS15231B">
 <img src="https://img.shields.io/badge/LVGL-9.2.2-4ADE80?style=for-the-badge" alt="LVGL 9.2.2">
 <img src="https://img.shields.io/badge/contas-até%204-8C8C98?style=for-the-badge" alt="até 4 contas">
@@ -19,8 +19,8 @@ Sem computador. Sem app. Sem nuvem.
 </div>
 
 O device consulta a API da Anthropic diretamente, lê o seu uso dos próprios cabeçalhos da resposta
-e desenha tudo num painel — mascotes **Clawd** animados, projeção de consumo, mapa de calor por
-hora do dia, relógios de reset e **até 4 contas** que você alterna na própria tela.
+e desenha tudo num painel — projeção de consumo, mapa de calor por hora do dia, relógios de reset,
+o **Clawd** animado nos momentos de limiar e **até 4 contas** que você alterna na própria tela.
 
 > Navegação 100% touch (swipe ← → entre as telas, sem botão físico). Adaptado do projeto original
 > **Claude Usage Stick** (um firmware multi-placa com botões físicos) para rodar **só nesta
@@ -65,7 +65,7 @@ Se você se vira bem num terminal, pule isso e vá para [Compilar e gravar](#com
 
 > As imagens abaixo são **mockups fiéis ao pixel**, renderizados a partir do próprio layout e da
 > paleta do firmware (fotos reais do device em breve) — regenere com
-> `python3 tools/gen_mockups.py`. Correspondem à v2.2, exceto que as quatro telas de swipe ainda
+> `python3 tools/gen_mockups.py`. Correspondem à v2.3, exceto que as quatro telas de swipe ainda
 > não mostram o selo `@label` da conta, que aparece no cabeçalho quando você adiciona a segunda.
 
 Navegue por **swipe** (os pontinhos embaixo mostram onde você está; o ativo vira uma pílula). A
@@ -79,9 +79,11 @@ refresh — tocar nela atualiza na hora.
 - Cada cartão traz: porcentagem grande e um **medidor de 18 segmentos** cujos segmentos acesos (e o
   número) deslizam continuamente do **verde ao âmbar e ao vermelho** conforme a janela enche, mais
   uma **contagem regressiva grande e ao vivo** até o reset e o **horário local do reset**.
-- Faixa inferior: **chip de status** geral (`OK` / `ATENCAO` / `BLOQUEADO`) e, quando a
-  [ponte de tokens](#tokens-por-sessão-ponte-opcional) está rodando, a **contagem real de tokens**
-  da janela de 5 h atual.
+- Rodapé em duas linhas: em cima, quando a [ponte de tokens](#tokens-por-sessão-ponte-opcional)
+  está rodando, a **contagem real de tokens** da janela de 5 h atual; embaixo, o **chip de status**
+  geral (`OK` / `ATENCAO` / `BLOQUEADO`) ao lado do **veredito da projeção** da janela de 5 h —
+  a mesma conta da [tela 3](#3-janela-de-5h), resumida: *"NAO esgota antes do reset (62%)"* em
+  verde, *"Esgota as 16:40 (em 1h32m)"* em âmbar/vermelho.
 
 <br clear="right">
 
@@ -93,7 +95,7 @@ refresh — tocar nela atualiza na hora.
   rodízio): `OK 0.9s` (verde, com latência) · `LIMITADO` (âmbar, HTTP 429) · `ERRO` (vermelho,
   5xx/rede) · `N/D` / `--` (cinza). O mascote fica cinza quando o modelo está inacessível ou sob
   incidente.
-- Uma **linha de incidentes** do `status.claude.com` (o problema é você ou a Anthropic?).
+- A antiga linha de incidentes saiu daqui: virou o [dialog da tela inicial](#aviso-de-incidente).
 
 <br clear="right">
 
@@ -103,7 +105,9 @@ refresh — tocar nela atualiza na hora.
 - Gráfico próprio com o **eixo X cobrindo exatamente a janela de 5 h atual** (início → reset).
 - Linha coral sólida = histórico real de uso; **linha pontilhada = projeção** no ritmo atual.
 - Veredito em linguagem simples, com cor: *"No ritmo atual, acaba as 16:40 (em 1h32m)"* (âmbar ou
-  vermelho) ou *"NAO acaba antes do reset (~62%)"* (verde).
+  vermelho) ou *"NAO acaba antes do reset (~62%)"* (verde). A versão curta desse mesmo veredito
+  aparece no rodapé da [tela 1](#1-agora), então você não precisa dar swipe para saber se vai
+  bater no teto.
 
 <br clear="right">
 
@@ -114,6 +118,42 @@ refresh — tocar nela atualiza na hora.
   hora atual fica destacada.
 - **Seletor de período** no topo: **Hoje / 7d / 30d / Tudo**. O histórico por dia é **persistido em
   flash** (31 dias no device).
+
+<br clear="right">
+
+### Aviso de incidente
+<img src="assets/mock-incidente.png" width="400" align="right" alt="Dialog de incidente">
+
+Quando o `status.claude.com` reporta um **incidente não resolvido** em qualquer modelo, um dialog
+modal toma a tela inicial: *"⚠ INCIDENTE ATIVO ⚠ — veja status.claude.com"*. Serve para responder a
+pergunta que importa na hora em que algo trava: **o problema é você ou a Anthropic?**
+
+A **gravidade** que o Statuspage reporta no campo `impact` do incidente vira um **chip** abaixo do
+título, e tinge a borda e o título:
+
+| `impact` | chip | cor |
+|---|---|---|
+| `minor` | `LEVE` | âmbar `#FBBF24` |
+| `major` | `GRAVE` | laranja `#FB923C` |
+| `critical` | `CRITICO` | vermelho `#F87171` |
+| `none` / ausente | `IMPACTO NAO DECLARADO` | âmbar `#FBBF24` |
+
+**Todo incidente que cita um modelo abre o dialog** — nenhum é suprimido em silêncio. Quando não há
+gravidade utilizável (o campo veio `none`, ou o parser não achou), o chip diz isso com todas as
+letras em vez de sumir e deixar o modal com cara de genérico.
+
+Abaixo do chip vêm os **modelos citados** pelo incidente, do mesmo scan de palavra-chave que decide
+se o dialog aparece — com a **versão**, quando o texto do incidente diz qual (`Opus 4.6 • Sonnet
+4.5`). Com as quatro famílias afetadas a linha vira só **`Todos`**; com três, as versões saem, senão
+a linha estoura os 262 px da coluna.
+
+Sem modelo citado a linha de modelos some — melhor omitir do que inventar. O que sobra sobe junto,
+sem buraco no layout.
+
+Toque em qualquer lugar (ou no `OK`) para dispensar. Ele **não volta a incomodar** enquanto aquele
+incidente durar — só reaparece se o incidente for resolvido e um novo surgir, **ou se a gravidade
+escalar** (um `minor` que vira `critical` alerta de novo, mesmo já dispensado). Se a gravidade muda
+com o dialog aberto, ele se redesenha na cor nova. O slideshow fica pausado enquanto está aberto.
 
 <br clear="right">
 
@@ -222,10 +262,13 @@ anthropic-ratelimit-unified-fallback-percentage
 anthropic-ratelimit-unified-overage-status / -overage-disabled-reason
 ```
 
-A saúde dos modelos combina `status.claude.com/api/v2/incidents/unresolved.json` (incidentes) com
-uma **sonda por modelo**: a cada ciclo de refresh o device manda uma requisição `max_tokens: 1`
-para o próximo modelo do rodízio (Haiku → Sonnet → Opus → Fable) e registra o código HTTP + a
-latência. É isso que alimenta as pílulas coloridas de status na tela Modelos.
+A saúde dos modelos vem de `status.claude.com/api/v2/incidents/unresolved.json`: incidentes não
+resolvidos citam a família do modelo no próprio texto, então basta um scan de palavra-chave
+(`status.cpp`), que também extrai o maior `impact` (`minor` / `major` / `critical`) da lista. É isso que dispara o [dialog de incidente](#aviso-de-incidente) na tela inicial.
+
+A **sonda por modelo** continua: a cada ciclo de refresh o device manda um `POST max_tokens: 1`
+para o próximo modelo do rodízio (Haiku → Sonnet → Opus → Fable) e registra código HTTP + latência.
+É isso que alimenta as pílulas da tela Modelos.
 
 ### Tokens por sessão (ponte opcional)
 
@@ -449,7 +492,7 @@ firmware/
   claude_stick/                 # o firmware (sketch do arduino-cli)
     claude_stick.ino            # setup/loop, máquina de estados, painel, telas
     api.cpp/.h                  # fetchUsage() — uso via cabeçalhos da API
-    status.cpp/.h               # fetchModelStatus() — saúde dos modelos
+    status.cpp/.h               # fetchModelStatus() — incidentes do status.claude.com
     crypto.cpp/.h               # AES-256-GCM + chave derivada do PIN
     accounts.cpp/.h             # slots de conta na NVS (multi-conta)
     certs.cpp/.h                # bundle de CAs para HTTPS
@@ -475,7 +518,8 @@ assets/                         # mockups das telas, banners do README + marca (
 
 - **Intervalo de consulta, endpoints, PIN, fuso:** pela tela (Ajustes) ou em `config.h`.
 - **Cores do tema / layout:** topo do `claude_stick.ino` (paleta) e os construtores `build_tile_*`.
-- **Mascotes:** `build_mascot()` no `claude_stick.ino`.
+- **Mascotes / momentos de limiar:** `show_moment()` no `claude_stick.ino`.
+- **Dialog de incidente:** `show_incident()` / `incident_sync()` no `claude_stick.ino`.
 
 ---
 

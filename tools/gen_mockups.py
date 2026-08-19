@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 gen_mockups.py — gera mockups 480x320 pixel-accurate das telas do firmware
-(layout v2.1) em assets/mock-*.png, usando os SVGs oficiais de assets/brand/.
+(layout v2.3) em assets/mock-*.png, usando os SVGs oficiais de assets/brand/.
 
 Sao mockups para o README ate existirem fotos reais do device. A fonte usa
 HelveticaNeue como substituta da Montserrat do LVGL.
