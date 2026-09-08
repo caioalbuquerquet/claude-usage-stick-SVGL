@@ -4,8 +4,9 @@
  *
  * Dashboard do rate-limit do Claude Code (janelas 5h e 7d, headers unified-*),
  * sonda real por modelo (latencia + HTTP), projecao de esgotamento da janela
- * 5h e ritmo de uso por hora com filtro de periodo. Token OAuth digitado na
- * tela e guardado cifrado (AES-256-GCM, chave derivada de um PIN de 4 digitos).
+ * 5h e ritmo de uso por hora com filtro de periodo. Incidentes do
+ * status.claude.com viram dialog na tela inicial. Token OAuth digitado na tela
+ * e guardado cifrado (AES-256-GCM, chave derivada de um PIN de 4 digitos).
  *
  * Tokens por sessao: a API nao expoe contagem para conta de assinatura; um
  * bridge opcional (tools/token_bridge.py) soma os transcripts locais do
@@ -33,6 +34,7 @@
 #include "crypto.h"
 #include "accounts.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
+#include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
 
 // ---- Paleta (escuro, minimalista; acento coral do Claude) ----
 #define C_BG       0x0F0F12
@@ -48,6 +50,7 @@
 #define C_OK       0x4ADE80
 #define C_WARN     0xFBBF24
 #define C_BAD      0xF87171
+#define C_SEV_MAJOR 0xFB923C   // laranja: gravidade "major" do status.claude.com
 
 // ---- Idioma (0 = portugues, 1 = english; Ajustes -> NVS "lang") ----
 static uint8_t g_lang = 0;
@@ -72,7 +75,7 @@ static void request_state(State s) { g_pending = s; g_dirty = true; }
 
 // ---- Dados ----
 static UsageData   g_usage = {};
-static ModelStatus g_status = {true, true, true, true, false};
+static ModelStatus g_status = {true, true, true, true, false, SEV_NONE};
 
 // ---- Modelos sondados (1 por ciclo, rotativo) ----
 #define NMODELS 4
@@ -110,6 +113,8 @@ static char g_pinFirst[PIN_LEN + 1] = {0};   // 1ª entrada no setup de PIN
 static bool g_pinConfirming = false;         // setup: confirmando 2ª vez
 static int  g_pinAttempts = 0;               // tentativas erradas (persistido)
 static uint32_t g_lockoutUntil = 0;          // millis até liberar nova tentativa
+static bool g_lockPainted = false;           // aviso ja esta em vermelho
+static int  g_lockSecs = -1;                 // ultimo segundo renderizado
 static bool g_timeInit = false;
 
 // ---- Refresh em background ----
@@ -161,10 +166,10 @@ struct DashUI {
   lv_obj_t *refBar;
   // agora (overview + reset mesclados)
   lv_obj_t *agChip, *agPct5, *agCd5, *agAt5;
-  lv_obj_t *agPct7, *agCd7, *agAt7, *agTok;
+  lv_obj_t *agPct7, *agCd7, *agAt7, *agTok, *agProj;
   lv_obj_t *seg5[NSEG], *seg7[NSEG];  // medidores segmentados
   // modelos
-  lv_obj_t *mChip[NMODELS], *incident;
+  lv_obj_t *mChip[NMODELS];
   // tendência da janela 5h (linhas custom)
   lv_obj_t *trHist, *trProj, *trDot, *trCap, *trT0, *trT1;
   // ritmo por hora
@@ -185,9 +190,11 @@ static void dash_tick();
 static void set_hdr_status();
 static void apply_tz();
 static void ui_pin();
+static void pin_lock_tick();
 static void ui_wifi();
 static void ui_token();
 static void ui_loading(const char *sub);
+static void ui_error();
 static void ui_main();
 static void ui_settings();
 static void ui_accounts();
@@ -357,6 +364,7 @@ static void factory_reset() {
   g_hasToken = false;
   g_token[0] = 0; g_pendingToken[0] = 0;
   g_pinAttempts = 0;
+  g_lockoutUntil = 0;                        // senao contamina a tela de setup
   g_onboarding = true;
   Serial.println("[RESET] tudo apagado");
 }
@@ -380,6 +388,43 @@ static void pin_update_dots() {
     if (i < PIN_LEN - 1) strcat(dots, " ");
   }
   lv_label_set_text(g_pinDots, dots);
+}
+
+// millis() vira em ~49 dias e o deadline pode cair do outro lado da volta:
+// comparar por delta assinado. O g_lockoutUntil == 0 precisa de guard proprio,
+// senao o delta fica negativo sozinho a partir de 2^31 ms de uptime (~24 dias)
+// e o teclado morreria sem nunca ter havido bloqueio.
+static bool pin_locked() {
+  return g_lockoutUntil != 0 && (int32_t)(millis() - g_lockoutUntil) < 0;
+}
+
+// O teclado destrava sozinho quando o deadline passa, mas a mensagem era
+// escrita uma unica vez em pin_submit(): ficava "Aguarde 60s" na tela com o PIN
+// ja aceitando digito. Este tick roda no loop() e cuida das duas pontas — conta
+// regressiva enquanto trava, aviso neutro ao liberar — e e dono tambem da cor,
+// para os dois estados nascerem no mesmo lugar.
+static void pin_lock_tick() {
+  if (!g_pinMsg) return;
+  char m[64];
+  if (pin_locked()) {
+    if (!g_lockPainted) {
+      g_lockPainted = true;
+      lv_obj_set_style_text_color(g_pinMsg, lv_color_hex(C_BAD), 0);
+    }
+    int rem = (int)((g_lockoutUntil - millis() + 999) / 1000);
+    if (rem == g_lockSecs) return;      // so reescreve quando o segundo vira
+    g_lockSecs = rem;
+    snprintf(m, sizeof(m), TRS("PIN errado (%d/%d). Aguarde %ds", "Wrong PIN (%d/%d). Wait %ds"),
+             g_pinAttempts, MAX_PIN_ATTEMPTS, rem);
+    lv_label_set_text(g_pinMsg, m);
+  } else if (g_lockPainted) {
+    g_lockPainted = false;
+    g_lockSecs = -1;
+    snprintf(m, sizeof(m), TRS("Pode tentar de novo (%d/%d)", "You can try again (%d/%d)"),
+             g_pinAttempts, MAX_PIN_ATTEMPTS);
+    lv_label_set_text(g_pinMsg, m);
+    lv_obj_set_style_text_color(g_pinMsg, lv_color_hex(C_MUTED), 0);
+  }
 }
 
 static void pin_submit() {
@@ -424,7 +469,7 @@ static void pin_submit() {
 
   // ST_PIN: tenta decifrar
   if (decryptToken(g_blob, g_pinEntry, g_token, sizeof(g_token))) {
-    g_pinAttempts = 0; save_attempts();
+    g_pinAttempts = 0; g_lockoutUntil = 0; save_attempts();
     strlcpy(g_sessionPin, g_pinEntry, sizeof(g_sessionPin));
     memset(g_pinEntry, 0, sizeof(g_pinEntry));
     Serial.printf("[PIN] ok, token %d chars\n", (int)strlen(g_token));
@@ -442,18 +487,15 @@ static void pin_submit() {
     int wait = LOCKOUT_BASE_SEC * (1 << (g_pinAttempts - 1));
     if (wait > 3600) wait = 3600;
     g_lockoutUntil = millis() + (uint32_t)wait * 1000;
-    if (g_pinMsg) {
-      char m[64];
-      snprintf(m, sizeof(m), TRS("PIN errado (%d/%d). Aguarde %ds", "Wrong PIN (%d/%d). Wait %ds"),
-               g_pinAttempts, MAX_PIN_ATTEMPTS, wait);
-      lv_label_set_text(g_pinMsg, m);
-    }
+    if (!g_lockoutUntil) g_lockoutUntil = 1;   // 0 e o sentinela de "sem bloqueio"
+    g_lockSecs = -1;
+    pin_lock_tick();                 // escreve ja; o loop() mantem a contagem
   }
 }
 
 static void pin_kb_cb(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) return;
-  if (millis() < g_lockoutUntil) return;     // travado
+  if (pin_locked()) return;                  // travado
   lv_obj_t *bm = (lv_obj_t *)lv_event_get_target(e);
   uint32_t id = lv_buttonmatrix_get_selected_button(bm);
   const char *txt = lv_buttonmatrix_get_button_text(bm, id);
@@ -488,6 +530,8 @@ static void ui_pin() {
     ? TRS("Voce vai digita-lo a cada boot.", "You'll type it on every boot.")
     : TRS("Necessario para desbloquear o token.", "Needed to unlock the token.");
   g_pinMsg = mklabel(scr, sub, &lv_font_montserrat_14, C_MUTED);
+  g_lockPainted = false;                       // label novo: estado do aviso zera
+  g_lockSecs = -1;
   lv_obj_align(g_pinMsg, LV_ALIGN_TOP_MID, 0, 86);
 
   lv_obj_t *bm = lv_buttonmatrix_create(scr);
@@ -501,11 +545,7 @@ static void ui_pin() {
   lv_obj_set_style_text_color(bm, lv_color_hex(C_TEXT), LV_PART_ITEMS);
   lv_obj_add_event_cb(bm, pin_kb_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-  if (millis() < g_lockoutUntil && g_pinMsg) {
-    int rem = (g_lockoutUntil - millis()) / 1000;
-    char m[48]; snprintf(m, sizeof(m), TRS("Aguarde %ds", "Wait %ds"), rem);
-    lv_label_set_text(g_pinMsg, m);
-  }
+  pin_lock_tick();      // se ha bloqueio pendente, ja nasce com a contagem
 }
 
 // ============================================================
@@ -854,6 +894,19 @@ static void ui_message(const char *title, const char *sub, uint32_t color) {
     lv_obj_align(s, LV_ALIGN_CENTER, 0, 20);
   }
 }
+// Tela de falha do primeiro load. Toque em qualquer lugar tenta de novo — e o
+// loop() ainda re-tenta sozinho a cada 15s (falha de rede/NTP costuma passar).
+static void ui_error() {
+  ui_message(TRS("Falha", "Failed"),
+             g_usage.error[0] ? g_usage.error : TRS("sem dados", "no data"), C_BAD);
+  lv_obj_t *scr = lv_screen_active();
+  lv_obj_t *h = mklabel(scr, TRS("toque para tentar de novo", "tap to retry"),
+                        &lv_font_montserrat_14, C_MUTED);
+  lv_obj_align(h, LV_ALIGN_CENTER, 0, 56);
+  lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(scr, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_LOADING);
+}
+
 static void ui_loading(const char *sub) {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_t *mark = build_claude_mark(scr);
@@ -1275,7 +1328,7 @@ static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
 // (verde -> vermelho conforme o uso) e countdown grande.
 static void build_win_card(lv_obj_t *t, int x, const char *title,
                            lv_obj_t **pct, lv_obj_t **seg, lv_obj_t **at, lv_obj_t **cd) {
-  lv_obj_t *c = card(t, x, 4, 228, 210);
+  lv_obj_t *c = card(t, x, 4, 228, 198);
   tstatic(c, title, &lv_font_montserrat_14, C_MUTED, 0, 0);
   *pct = tlabel(c, &lv_font_montserrat_48, C_OK, 0, 20);
   for (int i = 0; i < NSEG; i++)                    // medidor: 18 segmentos
@@ -1286,12 +1339,18 @@ static void build_win_card(lv_obj_t *t, int x, const char *title,
 static void build_tile_agora(lv_obj_t *t) {
   build_win_card(t, 8,   TRS("5 HORAS", "5 HOURS"), &g_ui.agPct5, g_ui.seg5, &g_ui.agAt5, &g_ui.agCd5);
   build_win_card(t, 244, TRS("SEMANA", "WEEK"),     &g_ui.agPct7, g_ui.seg7, &g_ui.agAt7, &g_ui.agCd7);
-  g_ui.agChip = mkchip(t, 8, 220);
-  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 130, 226);
-  lv_obj_set_width(g_ui.agTok, 342);
+  // rodape em duas linhas: tokens da sessao em cima, badge + projecao 5h embaixo.
+  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 8, 205);
+  lv_obj_set_width(g_ui.agTok, 464);
   lv_obj_set_style_text_align(g_ui.agTok, LV_TEXT_ALIGN_RIGHT, 0);
+  g_ui.agChip = mkchip(t, 8, 222);
+  // leitura da projecao da janela 5h (mesma conta do tile 1), ao lado do badge
+  g_ui.agProj = tlabel(t, &lv_font_montserrat_14, C_MUTED, 100, 226);
+  lv_obj_set_width(g_ui.agProj, 372);
+  lv_label_set_long_mode(g_ui.agProj, LV_LABEL_LONG_DOT);
 }
-// Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda + incidentes.
+// Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda real.
+// Incidentes nao aparecem mais aqui: viraram o dialog da tela inicial.
 static void build_tile_models(lv_obj_t *t) {
   static const int CENTERS[NMODELS] = {60, 180, 300, 420};
   for (int i = 0; i < NMODELS; i++) {
@@ -1306,9 +1365,6 @@ static void build_tile_models(lv_obj_t *t) {
   tstatic(t, TRS("sonda real na API \xE2\x80\xA2 1 modelo por ciclo",
                  "live API probe \xE2\x80\xA2 1 model per cycle"),
           &lv_font_montserrat_12, C_FAINT, 14, 170);
-  g_ui.incident = tlabel(t, &lv_font_montserrat_14, C_MUTED, 14, 194);
-  lv_obj_set_width(g_ui.incident, 452);
-  lv_label_set_long_mode(g_ui.incident, LV_LABEL_LONG_WRAP);
 }
 // Tile 2 — JANELA 5H: histórico + projeção pontilhada até esgotar.
 #define TR_X0 12
@@ -1474,6 +1530,14 @@ static void dash_tick() {
   set_hdr_status();
 }
 
+// Espelha a leitura da projeção da janela 5h no rodapé da tela inicial
+// (tile AGORA, ao lado do badge). Versão curta do mesmo texto do tile 1.
+static void set_ag_proj(const char *txt, uint32_t color) {
+  if (!g_ui.agProj) return;
+  lv_label_set_text(g_ui.agProj, txt);
+  lv_obj_set_style_text_color(g_ui.agProj, lv_color_hex(color), 0);
+}
+
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
 static void trend_redraw() {
   if (!g_ui.trHist) return;
@@ -1487,6 +1551,7 @@ static void trend_redraw() {
     lv_obj_add_flag(g_ui.trDot, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_ui.trCap, TRS("Aguardando dados da janela...", "Waiting for window data..."));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
+    set_ag_proj(TRS("Aguardando dados...", "Waiting for data..."), C_MUTED);
     return;
   }
   uint32_t ws = we - 5 * 3600;
@@ -1524,6 +1589,7 @@ static void trend_redraw() {
     lv_label_set_text(g_ui.trCap, TRS("Coletando dados... (~alguns minutos)",
                                       "Collecting data... (~a few minutes)"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
+    set_ag_proj(TRS("Coletando dados...", "Collecting data..."), C_MUTED);
     return;
   }
 
@@ -1550,6 +1616,9 @@ static void trend_redraw() {
                                "Window exhausted \xE2\x80\xA2 resets in %s"), e);
     lv_label_set_text(g_ui.trCap, b);
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_BAD), 0);
+    snprintf(b, sizeof(b), TRS("Esgotada \xE2\x80\xA2 reseta em %s",
+                               "Exhausted \xE2\x80\xA2 resets in %s"), e);
+    set_ag_proj(b, C_BAD);
   } else if (rate > 0.02f) {
     float minsLeft = (100.0f - g_usage.h5) / rate;
     uint32_t etaT = (uint32_t)now + (uint32_t)(minsLeft * 60);
@@ -1563,6 +1632,9 @@ static void trend_redraw() {
                hm, (int)minsLeft / 60, (int)minsLeft % 60);
       lv_label_set_text(g_ui.trCap, b);
       lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(minsLeft < 60 ? C_BAD : C_WARN), 0);
+      snprintf(b, sizeof(b), TRS("Esgota as %s (em %dh%02dm)", "Runs out at %s (in %dh%02dm)"),
+               hm, (int)minsLeft / 60, (int)minsLeft % 60);
+      set_ag_proj(b, minsLeft < 60 ? C_BAD : C_WARN);
     } else {
       float endPct = g_usage.h5 + rate * ((we - (uint32_t)now) / 60.0f);
       g_trProjPts[1].x = tr_x(we, ws, we);
@@ -1572,6 +1644,10 @@ static void trend_redraw() {
                (int)(endPct + 0.5f));
       lv_label_set_text(g_ui.trCap, b);
       lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
+      snprintf(b, sizeof(b), TRS("NAO esgota antes do reset (%d%%)",
+                                 "Does NOT run out before reset (%d%%)"),
+               (int)(endPct + 0.5f));
+      set_ag_proj(b, C_OK);
     }
     lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
   } else {
@@ -1579,6 +1655,7 @@ static void trend_redraw() {
     lv_label_set_text(g_ui.trCap, TRS("Uso estavel \xE2\x80\xA2 sem risco no momento",
                                       "Stable usage \xE2\x80\xA2 no risk right now"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
+    set_ag_proj(TRS("Uso estavel \xE2\x80\xA2 sem risco", "Stable \xE2\x80\xA2 no risk"), C_OK);
   }
 }
 
@@ -1802,6 +1879,166 @@ static void moment_tick() {
   if (millis() > g_momentUntil) moment_close();
 }
 
+// ============================================================
+// Dialog de incidente — status.claude.com reportando problema nao resolvido
+// Modal em lv_layer_top: escurece a tela inicial, some no toque. So volta a
+// aparecer depois que o incidente e resolvido e um novo surge (g_incAck).
+// ============================================================
+static lv_obj_t *g_incDlg = nullptr;   // overlay vivo (nullptr = fechado)
+static bool g_incAck = false;          // usuario ja dispensou o incidente atual
+static uint8_t g_incSev = 0xFF;        // severidade desenhada no dialog atual
+static uint8_t g_incMask = 0xFF;       // modelos afetados desenhados no dialog
+
+// Bitmask dos modelos citados pelos incidentes abertos (Haiku, Sonnet, Opus,
+// Fable). Vem do mesmo scan de palavra-chave que decide se o dialog aparece.
+static uint8_t affected_mask() {
+  return (uint8_t)((!g_status.haikuUp)       | (!g_status.sonnetUp) << 1 |
+                   (!g_status.opusUp)   << 2 | (!g_status.fableUp)  << 3);
+}
+
+// "Opus 4.6 \u2022 Sonnet 4.5". Os quatro afetados viram "Todos"; false = nenhum
+// modelo citado, ai a linha some.
+//
+// A versao so entra com ate 2 modelos: com 3, "Haiku 4.5 \u2022 Sonnet 4.5 \u2022 Opus 4.6"
+// passa dos 262 px da coluna e o LONG_DOT cortaria justamente o ultimo nome.
+static bool affected_models(char *out, size_t sz) {
+  static const char *NAMES[4] = {"Haiku", "Sonnet", "Opus", "Fable"};
+  uint8_t mask = affected_mask();
+  out[0] = 0;
+  if (mask == 0x0F) { strlcpy(out, TRS("Todos", "All"), sz); return true; }
+
+  int total = 0;
+  for (int i = 0; i < 4; i++) if (mask & (1 << i)) total++;
+  bool withVer = (total <= 2);
+
+  int n = 0;
+  for (int i = 0; i < 4; i++) {
+    if (!(mask & (1 << i))) continue;
+    if (n++) strlcat(out, " \xE2\x80\xA2 ", sz);
+    strlcat(out, NAMES[i], sz);
+    if (withVer && g_status.version[i][0]) {
+      strlcat(out, " ", sz);
+      strlcat(out, g_status.version[i], sz);
+    }
+  }
+  return n > 0;
+}
+
+// Palavra do "impact" do Statuspage. Todo incidente alerta: quando nao ha
+// gravidade utilizavel o chip diz isso na cara, em vez de sumir e deixar o
+// modal parecendo generico.
+static const char *severity_label(uint8_t sev) {
+  switch (sev) {
+    case SEV_CRITICAL: return TRS("CRITICO", "CRITICAL");
+    case SEV_MAJOR:    return TRS("GRAVE", "MAJOR");
+    case SEV_MINOR:    return TRS("LEVE", "MINOR");
+    default:           return TRS("IMPACTO NAO DECLARADO", "IMPACT NOT DECLARED");
+  }
+}
+
+// Cor do dialog por gravidade reportada no "impact" do status.claude.com.
+static uint32_t severity_color(uint8_t sev) {
+  return sev >= SEV_CRITICAL ? C_BAD
+       : sev == SEV_MAJOR    ? C_SEV_MAJOR
+                             : C_WARN;   // minor / desconhecido
+}
+
+static void incident_close() {
+  if (!g_incDlg) return;
+  lv_obj_delete(g_incDlg);
+  g_incDlg = nullptr;
+}
+static void incident_dismiss_cb(lv_event_t *e) { (void)e; g_incAck = true; incident_close(); }
+
+static void show_incident() {
+  incident_close();
+  g_incSev = g_status.severity;
+  g_incMask = affected_mask();
+  uint32_t sevCol = severity_color(g_incSev);
+
+  lv_obj_t *s = lv_obj_create(lv_layer_top());
+  g_incDlg = s;
+  lv_obj_set_pos(s, 0, 0); lv_obj_set_size(s, 480, 320);
+  lv_obj_set_style_bg_color(s, lv_color_hex(C_BG), 0);
+  lv_obj_set_style_bg_opa(s, 210, 0);
+  lv_obj_set_style_border_width(s, 0, 0);
+  lv_obj_set_style_radius(s, 0, 0);
+  lv_obj_set_style_pad_all(s, 0, 0);
+  lv_obj_clear_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(s, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(s, incident_dismiss_cb, LV_EVENT_CLICKED, NULL);
+
+  // Caixa 420x206 (pad 18 -> area util 384x170): Clawd "morto" na esquerda,
+  // coluna com titulo + chip de gravidade + modelos afetados + link + botao.
+  lv_obj_t *box = lv_obj_create(s);
+  lv_obj_set_size(box, 420, 206);
+  lv_obj_center(box);
+  lv_obj_set_style_bg_color(box, lv_color_hex(C_SURFACE), 0);
+  lv_obj_set_style_radius(box, 18, 0);
+  lv_obj_set_style_border_width(box, 2, 0);
+  lv_obj_set_style_border_color(box, lv_color_hex(sevCol), 0);
+  lv_obj_set_style_pad_all(box, 18, 0);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *dead = lv_image_create(box);
+  lv_image_set_src(dead, &img_clawd_dead);
+  lv_obj_align(dead, LV_ALIGN_LEFT_MID, 0, 0);
+
+  const int TX = CLAWD_DEAD_W + 18;          // inicio da coluna de texto
+  const int TW = 384 - TX;                   // largura util dessa coluna
+
+  lv_obj_t *t = mklabel(box, TRS(LV_SYMBOL_WARNING "  INCIDENTE ATIVO  " LV_SYMBOL_WARNING,
+                                 LV_SYMBOL_WARNING "  ACTIVE INCIDENT  " LV_SYMBOL_WARNING),
+                        &lv_font_montserrat_20, sevCol);
+  lv_obj_set_width(t, TW);
+  lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+  // empilhamento sequencial: chip e modelos somem quando nao ha o que dizer,
+  // e o que sobra sobe junto em vez de deixar buraco.
+  int y = 4;
+  lv_obj_align(t, LV_ALIGN_TOP_LEFT, TX, y);
+  y += 30;
+
+  lv_obj_t *chip = mkchip(box, 0, 0);
+  set_chip(chip, severity_label(g_incSev), sevCol);
+  lv_obj_update_layout(chip);
+  lv_obj_align(chip, LV_ALIGN_TOP_LEFT, TX + (TW - lv_obj_get_width(chip)) / 2, y);
+  y += 32;
+
+  char mods[80];
+  if (affected_models(mods, sizeof(mods))) {
+    lv_obj_t *ml = mklabel(box, mods, &lv_font_montserrat_16, C_TEXT);
+    lv_obj_set_width(ml, TW);
+    lv_label_set_long_mode(ml, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(ml, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(ml, LV_ALIGN_TOP_LEFT, TX, y);
+    y += 24;
+  }
+
+  lv_obj_t *m = mklabel(box, TRS("veja status.claude.com", "see status.claude.com"),
+                        &lv_font_montserrat_12, C_MUTED);
+  lv_obj_set_width(m, TW);
+  lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(m, LV_ALIGN_TOP_LEFT, TX, y);
+
+  lv_obj_t *ok = mkbtn(box, "OK", &lv_font_montserrat_16, C_SURFACE2, C_TEXT);
+  lv_obj_set_size(ok, 140, 44);
+  lv_obj_align(ok, LV_ALIGN_BOTTOM_LEFT, TX + (TW - 140) / 2, 0);
+  lv_obj_add_event_cb(ok, incident_dismiss_cb, LV_EVENT_CLICKED, NULL);
+}
+
+// Abre/fecha o dialog conforme a ultima leitura do status.claude.com.
+static void incident_sync() {
+  if (g_state != ST_MAIN) return;
+  bool any = g_status.ok &&
+             !(g_status.haikuUp && g_status.sonnetUp && g_status.opusUp && g_status.fableUp);
+  if (!any) { g_incAck = false; g_incSev = g_incMask = 0xFF; incident_close(); return; }
+
+  uint8_t sev = g_status.severity, mask = affected_mask();
+  if (g_incDlg && (sev != g_incSev || mask != g_incMask)) incident_close();   // redesenha
+  else if (g_incAck && g_incSev != 0xFF && sev > g_incSev) g_incAck = false;  // escalou
+  if (!g_incAck && !g_incDlg) show_incident();
+}
+
 // Preenche todos os valores vindos do fetch (sem rebuild de tela).
 static void refresh_ui_values() {
   if (g_state != ST_MAIN || !g_ui.agPct5) return;
@@ -1818,7 +2055,7 @@ static void refresh_ui_values() {
   set_chip(g_ui.agChip, overall_label(g_usage.statusOverall), status_color(g_usage.statusOverall));
   update_tok_row();
 
-  // Modelos: chips de sonda + incidente
+  // Modelos: chips de sonda
   for (int i = 0; i < NMODELS; i++) {
     if (!g_ui.mChip[i]) continue;
     char txt[16]; uint32_t col;
@@ -1828,16 +2065,8 @@ static void refresh_ui_values() {
     static const int CENTERS[NMODELS] = {60, 180, 300, 420};
     lv_obj_set_x(g_ui.mChip[i], CENTERS[i] - lv_obj_get_width(g_ui.mChip[i]) / 2);
   }
-  if (g_ui.incident) {
-    bool any = !(g_status.haikuUp && g_status.sonnetUp && g_status.opusUp && g_status.fableUp);
-    lv_label_set_text(g_ui.incident,
-        !g_status.ok ? TRS("status.claude.com: sem dados", "status.claude.com: no data")
-        : (any ? TRS("Incidente ativo \xE2\x80\xA2 veja status.claude.com",
-                     "Active incident \xE2\x80\xA2 see status.claude.com")
-               : TRS("status.claude.com: OK \xE2\x80\xA2 sem incidentes",
-                     "status.claude.com: OK \xE2\x80\xA2 no incidents")));
-    lv_obj_set_style_text_color(g_ui.incident, lv_color_hex(any ? C_WARN : C_FAINT), 0);
-  }
+
+  incident_sync();
 
   trend_redraw();
   heat_redraw();
@@ -2393,6 +2622,7 @@ static void render_state() {
   stop_web();                                 // cada tela sobe o servidor que precisa
   moment_close();                             // overlay vive em lv_layer_top
   lv_obj_clean(lv_layer_top());
+  g_incDlg = nullptr;                         // dialog de incidente idem
   // invalida ponteiros vivos antes de destruir a tela antiga
   memset(&g_ui, 0, sizeof(g_ui));
   g_mascN = 0;
@@ -2418,8 +2648,7 @@ static void render_state() {
     case ST_ACCOUNTS:  ui_accounts(); break;
     case ST_ACCT_NAME: ui_account_name(); break;
     case ST_ABOUT:     ui_about(); break;
-    case ST_ERROR:     ui_message(TRS("Falha", "Failed"),
-                                  g_usage.error[0] ? g_usage.error : TRS("sem dados", "no data"), C_BAD); break;
+    case ST_ERROR:     ui_error(); break;
     default: break;
   }
 }
@@ -2435,6 +2664,22 @@ static void ensure_time() {
   Serial.println("[NTP] sync iniciado");
 }
 
+// A validacao do certificado TLS compara as datas do cert com o relogio do
+// device. Disparar o fetch antes do NTP chegar devolve http_-1 (handshake
+// recusado), e ate a v2.3 isso jogava o boot direto na tela de erro sem volta.
+static bool wait_for_time(uint32_t timeoutMs) {
+  ensure_time();
+  uint32_t t0 = millis();
+  while (time(nullptr) < 1000000000L && millis() - t0 < timeoutMs) {
+    lv_task_handler();
+    delay(50);
+  }
+  bool ok = time(nullptr) > 1000000000L;
+  Serial.printf("[NTP] relogio %s em %ums\n", ok ? "pronto" : "SEM SYNC",
+                (unsigned)(millis() - t0));
+  return ok;
+}
+
 // Sonda o próximo modelo da rotação.
 static void probe_next_model() {
   int mi = g_probeIdx % NMODELS;
@@ -2445,7 +2690,7 @@ static void probe_next_model() {
 
 // Primeiro load (mostra a tela de carregamento). Vai p/ ST_MAIN ou ST_ERROR.
 static void do_refresh() {
-  ensure_time();
+  wait_for_time(10000);
   bool ok = fetchUsage(g_token, g_usage);
   if (ok) {
     fetchModelStatus(g_status); g_lastOkMs = millis(); g_lastFetchOk = true;
@@ -2581,6 +2826,21 @@ void loop() {
     bg_refresh();           // seta g_lastPollMs no fim
   }
 
+  // Contagem do bloqueio por PIN errado. 250ms para o segundo virar sem atraso
+  // visivel; o tick so reescreve o label quando o valor muda. So ST_PIN: o
+  // setup de PIN nao tem tentativa nem bloqueio.
+  if (g_state == ST_PIN) {
+    static uint32_t lastLock = 0;
+    if (millis() - lastLock > 250) { lastLock = millis(); pin_lock_tick(); }
+  }
+
+  // Falha no primeiro load nao pode ser terminal: o poll automatico so roda em
+  // ST_MAIN, entao sem isto a placa fica presa na tela de erro ate o reset.
+  if (g_state == ST_ERROR && millis() - g_lastPollMs > 15000) {
+    g_lastPollMs = millis();
+    request_state(ST_LOADING);
+  }
+
   // Atualização viva: contadores (1s), barra de refresh (250ms), mascotes,
   // slideshow (5s, pausa 10s após qualquer toque)
   if (g_state == ST_MAIN) {
@@ -2627,7 +2887,7 @@ void loop() {
         }
       }
     }
-    if (g_slideSec > 0 && g_ui.tv && !g_refreshing && !g_mo.scrim &&
+    if (g_slideSec > 0 && g_ui.tv && !g_refreshing && !g_mo.scrim && !g_incDlg &&
         now - g_lastTouchMs > 10000 && now - g_lastSlideMs > (uint32_t)g_slideSec * 1000) {
       g_lastSlideMs = now;
       int next = (g_curTile + 1) % NTILES;
