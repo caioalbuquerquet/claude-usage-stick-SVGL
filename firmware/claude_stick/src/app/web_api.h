@@ -3,6 +3,9 @@
 // /health em THEP_DEV). Fase 2: o POST /token não valida mais no handler: ele
 // enfileira um job VALIDATE na net_task e responde 202; a página consulta
 // GET /token/status até o resultado chegar (item 6 do plano da v3).
+// Fase 4: GET /window?account=<rótulo> e POST /tokens com "account" vão para
+// o slot com esse rótulo (strcmp exato), 404 se não existe; sem rótulo, para a
+// conta em foco (Technical Plan §8).
 // Não chama o LVGL: o que mexe na tela passa pelos callbacks do .ino.
 #include <stdint.h>
 

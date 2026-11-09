@@ -18,6 +18,7 @@
 #include "net/token_store.h"
 #include "model/accounts.h"
 #include "model/account_state.h"
+#include "logic/bridge_route.h"
 
 // ficam no .ino (item 2 do plano da v3)
 extern WiFiManager g_wifi;
@@ -211,47 +212,91 @@ static long long jll(const String &s, const char *key) {
   i = s.indexOf(':', i + k.length() - 1); if (i < 0) return 0;
   return atoll(s.c_str() + i + 1);
 }
+// Valor string de key no JSON do bridge. Aceita os escapes \" e \\ (e \/);
+// \uXXXX não é decodificado (o bridge manda UTF-8 cru, ensure_ascii=False).
 static bool jstr(const String &s, const char *key, char *out, size_t sz) {
   String k = String("\"") + key + "\"";
   int i = s.indexOf(k); if (i < 0) return false;
   i = s.indexOf(':', i + k.length()); if (i < 0) return false;
   i = s.indexOf('"', i); if (i < 0) return false;
-  int e = s.indexOf('"', i + 1); if (e < 0) return false;
-  strlcpy(out, s.substring(i + 1, e).c_str(), sz);
-  return true;
+  size_t o = 0;
+  for (int p = i + 1; p < (int)s.length(); p++) {
+    char c = s[p];
+    if (c == '"') { out[o] = 0; return true; }
+    if (c == '\\' && p + 1 < (int)s.length()) c = s[++p];
+    if (o + 1 < sz) out[o++] = c;
+  }
+  out[0] = 0;
+  return false;   // string sem fim
 }
+
+// Slot de destino do bridge (Technical Plan §8): rótulo exato, ou a conta em
+// foco sem rótulo. -1 = rótulo desconhecido (404).
+static int bridge_slot(const char *lbl) {
+  return bridge_target_slot(g_accts.used, &g_accts.label[0][0], ACCT_LBL_MAX, ACCT_MAX,
+                            g_accts.active, lbl);
+}
+
+static void send_unknown_account(const char *lbl) {
+  char e[ACCT_LBL_MAX * 6], b[160];
+  json_escape(lbl, e, sizeof(e));
+  snprintf(b, sizeof(b), "{\"error\":\"unknown_account\",\"account\":\"%s\"}", e);
+  g_web->send(404, "application/json", b);
+}
+
+// GET /window[?account=<rótulo>] (item 6, fase 4). Sem parâmetro: a conta em
+// foco (compatível com a v2.3). Conta sem dados ainda: números em 0 e
+// "pending":true.
 static void handleWindow() {
-  const UsageData &u = acct[g_accts.active].usage;
-  char b[256];
-  snprintf(b, sizeof(b),
-           "{\"now\":%lu,\"h5_reset\":%lu,\"d7_reset\":%lu,\"h5_util\":%.4f,\"d7_util\":%.4f,"
-           "\"account\":\"%s\",\"slot\":%d}",
-           (unsigned long)time(nullptr),
-           (unsigned long)u.h5ResetEpoch, (unsigned long)u.d7ResetEpoch,
-           u.h5 / 100.0f, u.d7 / 100.0f,
-           g_accts.label[g_accts.active], g_accts.active);
-  g_web->send(200, "application/json", b);
-}
-static void handleTokensPost() {
-  String body = g_web->arg("plain");
-  char lbl[ACCT_LBL_MAX];
-  if (jstr(body, "account", lbl, sizeof(lbl)) && lbl[0] &&
-      strcmp(lbl, g_accts.label[g_accts.active]) != 0) {
-    char r[96];
-    snprintf(r, sizeof(r), "{\"error\":\"account_mismatch\",\"active\":\"%s\"}",
-             g_accts.label[g_accts.active]);
-    g_web->send(409, "application/json", r);
+  String q = g_web->arg("account");   // o WebServer já decodifica %XX
+  char lbl[ACCT_LBL_MAX * 2];
+  strlcpy(lbl, q.c_str(), sizeof(lbl));
+  int slot = bridge_slot(lbl);
+  if (slot < 0) {
+    if (lbl[0]) send_unknown_account(lbl);
+    else g_web->send(404, "application/json", "{\"error\":\"no_account\"}");
     return;
   }
-  TokenStats &tok = acct[g_accts.active].tok;
+  const AccountState &a = acct[slot];
+  bool pending = a.usageAtEpoch == 0;
+  UsageData u = {};
+  if (!pending) u = a.usage;
+  char e[ACCT_LBL_MAX * 6], b[320];
+  json_escape(g_accts.label[slot], e, sizeof(e));
+  snprintf(b, sizeof(b),
+           "{\"now\":%lu,\"h5_reset\":%lu,\"d7_reset\":%lu,\"h5_util\":%.4f,\"d7_util\":%.4f,"
+           "\"account\":\"%s\",\"slot\":%d,\"focused\":%s,\"pending\":%s}",
+           (unsigned long)time(nullptr),
+           (unsigned long)u.h5ResetEpoch, (unsigned long)u.d7ResetEpoch,
+           u.h5 / 100.0f, u.d7 / 100.0f, e, slot,
+           slot == g_accts.active ? "true" : "false", pending ? "true" : "false");
+  g_web->send(200, "application/json", b);
+}
+
+// POST /tokens (item 6, fase 4): com "account", vai para o slot com esse
+// rótulo; sem ele (ou vazio), para a conta em foco; desconhecido -> 404.
+// O 409 account_mismatch da v2.3 saiu.
+static void handleTokensPost() {
+  String body = g_web->arg("plain");
+  char lbl[ACCT_LBL_MAX * 2];
+  if (!jstr(body, "account", lbl, sizeof(lbl))) lbl[0] = 0;
+  int slot = bridge_slot(lbl);
+  if (slot < 0) {
+    if (lbl[0]) send_unknown_account(lbl);
+    else g_web->send(404, "application/json", "{\"error\":\"no_account\"}");
+    return;
+  }
+  TokenStats &tok = acct[slot].tok;
   tok.tin      = jll(body, "in");
   tok.tout     = jll(body, "out");
   tok.cache    = jll(body, "cache");
   tok.sessions = (int)jll(body, "sessions");
   tok.atMs     = millis();
-  Serial.printf("[TOK] in=%lld out=%lld cache=%lld sess=%d\n",
-                tok.tin, tok.tout, tok.cache, tok.sessions);
-  g_web->send(200, "application/json", "{\"ok\":true}");
+  Serial.printf("[TOK] [slot %d] in=%lld out=%lld cache=%lld sess=%d\n",
+                slot, tok.tin, tok.tout, tok.cache, tok.sessions);
+  char r[48];
+  snprintf(r, sizeof(r), "{\"ok\":true,\"slot\":%d}", slot);
+  g_web->send(200, "application/json", r);
   if (s_onTokStats) s_onTokStats();
 }
 static void handleInfo() {
@@ -259,8 +304,8 @@ static void handleInfo() {
                "<meta name=viewport content='width=device-width,initial-scale=1'>"
                "<title>Claude Usage Stick</title><style>" WEB_CSS "</style></head><body><div class=card>"
                "<h1>" WEB_SPARK " Claude Usage Stick</h1>"
-               "<p>Device online. Endpoints: <code>GET /window</code> (janela atual) e "
-               "<code>POST /tokens</code> (bridge de tokens por sessao — ver tools/token_bridge.py). "
+               "<p>Device online. Endpoints: <code>GET /window[?account=rotulo]</code> (janela atual) e "
+               "<code>POST /tokens</code> (bridge de tokens por conta — ver tools/token_bridge.py). "
                "Para adicionar ou trocar uma conta, abra a tela de token no aparelho e use <a href='/'>/</a>.</p>"
                "</div></body></html>");
   g_web->send(200, "text/html; charset=utf-8", h);
