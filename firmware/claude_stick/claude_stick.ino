@@ -34,7 +34,12 @@
 #include "model/account_state.h"
 #include "model/history.h"
 #include "logic/projection.h"
+#include "logic/levels.h"
+#include "net/poller.h"
+#include "net/scheduler.h"
+#include "net/token_store.h"
 #include "app/web_api.h"
+#include <mbedtls/platform_util.h>
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
 
@@ -68,35 +73,31 @@ Preferences g_prefs;
 // ---- Estado da aplicação ----
 enum State {
   ST_BOOT, ST_PIN, ST_SETUP_PIN, ST_WIFI, ST_TOKEN,
-  ST_LOADING, ST_MAIN, ST_SETTINGS, ST_ACCOUNTS, ST_ACCT_NAME, ST_ABOUT, ST_ERROR
+  ST_MAIN, ST_SETTINGS, ST_ACCOUNTS, ST_ACCT_NAME, ST_ABOUT
 };
 static State g_state = ST_BOOT;
 static State g_pending = ST_BOOT;
 static bool  g_dirty = false;
+static bool  g_uiDirty = false;   // chegou resultado da net_task: refresh_ui_values() em ST_MAIN
 static void request_state(State s) { g_pending = s; g_dirty = true; }
 
 // ---- Dados: g_status e g_models[] ficam em src/model/account_state ----
-
-// ---- Modelos sondados (1 por ciclo, rotativo) ----
-static int g_probeIdx = 0;
 
 // ---- Uso, tokens por sessao, limiares e historico por conta: acct[] (src/model/account_state.h).
 // Fase 1: a tela mostra so a conta em foco, acct[g_accts.active]. ----
 
 // ---- Token / segurança ----
+// Fase 2 (item 23): os tokens decifrados ficam em src/net/token_store (sob
+// mutex, lidos pela net_task). Aqui fica só a chave da sessão, derivada uma
+// vez no desbloqueio e usada para cifrar/decifrar todos os slots; zerada no
+// factory reset. Nada disso vai para o NVS.
 AccountSlots g_accts;               // lida por web_api.cpp
-static EncryptedBlob g_blob;
-static bool g_hasToken = false;              // existe conta salva no NVS
 static bool g_onboarding = false;            // primeiro setup em andamento
-static char g_token[200] = {0};              // token decifrado (só em RAM)
-char g_pendingToken[200] = {0};              // token digitado, aguardando PIN
-// PIN da sessao: fica em RAM do desbloqueio ate o reboot, porque trocar de conta
-// e adicionar conta precisam decifrar/cifrar OUTROS slots sem pedir o PIN de novo.
-// Trade-off aceito: nao enfraquece o modelo — o token JA vive decifrado em
-// g_token, entao quem consegue ler a RAM ja tem o que interessa. O que continua
-// valendo: nada disso vai para o NVS, e factory_reset() zera este buffer.
-static char g_sessionPin[PIN_LEN + 1] = {0};
-static int  g_tokenTargetSlot = 0;
+static uint8_t g_sessionKey[32] = {0};
+static bool g_unlocked = false;
+static bool session_unlocked() { return g_unlocked; }
+static bool has_accounts() { return accountCount(g_accts) > 0; }
+int  g_tokenTargetSlot = 0;                  // lido por web_api.cpp (VALIDATE)
 char g_pendingLabel[ACCT_LBL_MAX] = {0};
 static char g_pinEntry[PIN_LEN + 1] = {0};   // dígitos sendo digitados
 static char g_pinFirst[PIN_LEN + 1] = {0};   // 1ª entrada no setup de PIN
@@ -105,20 +106,13 @@ static int  g_pinAttempts = 0;               // tentativas erradas (persistido)
 static uint32_t g_lockoutUntil = 0;          // millis até liberar nova tentativa
 static bool g_lockPainted = false;           // aviso ja esta em vermelho
 static int  g_lockSecs = -1;                 // ultimo segundo renderizado
-static bool g_timeInit = false;
 
-// ---- Refresh em background ----
-static bool g_wantRefresh = false;        // botão de refresh pediu atualização
-static bool g_refreshing = false;         // busca em andamento
-static bool g_lastFetchOk = true;         // último fetch deu certo?
-static uint32_t g_lastOkMs = 0;           // millis do último sucesso (p/ "atualizado há Xs")
 static lv_obj_t *g_hdrStatus = nullptr;   // texto de status no cabeçalho do dashboard
 
 // ---- Brilho ----
 static const uint8_t BRI_LEVELS[3] = {60, 160, 255};
 static int g_briIdx = 1;
 
-static uint32_t g_lastPollMs = 0;         // millis do último poll (p/ barra de refresh)
 int g_pollSec = DEFAULT_POLL_SEC;         // intervalo de atualização (config, NVS); lido pelo agendador
 int g_tzOffset = -3;                      // fuso GMT (horas), config NVS
 static int g_slideSec = 0;                // slideshow: 0=off, 5/10/15/30s (config, NVS)
@@ -140,7 +134,6 @@ static lv_point_precise_t g_mXPts[NMODELS][4][2];   // olhos em X (mood 3)
 #define NSEG 18                       // segmentos do medidor de janela
 struct DashUI {
   lv_obj_t *tv, *tile[NTILES], *dots[NTILES];
-  lv_obj_t *refBar;
   // agora (overview + reset mesclados)
   lv_obj_t *agChip, *agPct5, *agCd5, *agAt5;
   lv_obj_t *agPct7, *agCd7, *agAt7, *agTok, *agProj;
@@ -165,25 +158,22 @@ static void render_state();
 static void refresh_ui_values();
 static void dash_tick();
 static void set_hdr_status();
-static void apply_tz();
 static void ui_pin();
 static void pin_lock_tick();
 static void ui_wifi();
 static void ui_token();
-static void ui_loading(const char *sub);
-static void ui_error();
 static void ui_main();
 static void ui_settings();
 static void ui_accounts();
 static void ui_account_name();
-static void ui_message(const char *title, const char *sub, uint32_t color);
 static void nav_cb(lv_event_t *e);
 static void trend_redraw();
 static void heat_redraw();
 static void update_tok_row();
-static void show_moment(int win, int thr);
+static void show_moment(int slot, int win, int thr);
 static void moment_tick();
 static void moment_close();
+static void incident_sync();
 
 // ============================================================
 // Pipeline de display/touch (validado no bring-up)
@@ -301,10 +291,6 @@ static void fmt_tok(long long v, char *out, int sz) {
 static void load_persisted() {
   g_prefs.begin(NVS_NAMESPACE, false);
   accountsLoad(g_prefs, g_accts);
-  if (g_accts.used[g_accts.active] &&
-      accountLoadBlob(g_prefs, g_accts.active, g_blob)) {
-    g_hasToken = true;
-  }
   g_pinAttempts = g_prefs.getInt("pinatt", 0);
   g_briIdx = g_prefs.getInt("bri", 1);
   if (g_briIdx < 0 || g_briIdx > 2) g_briIdx = 1;
@@ -330,12 +316,18 @@ static void factory_reset() {
     LittleFS.remove(pth);
   }
   memset(&g_accts, 0, sizeof(g_accts));
-  memset(g_sessionPin, 0, sizeof(g_sessionPin));
+  scheduler_stop();
+  stop_web();
+  web_token_reset();
+  token_store_clear_all();
+  token_store_clear_pending();
+  mbedtls_platform_zeroize(g_sessionKey, sizeof(g_sessionKey));
+  g_unlocked = false;
   g_pendingLabel[0] = 0;
   g_tokenTargetSlot = 0;
-  for (int i = 0; i < ACCT_MAX; i++) acct_clear(i);
-  g_hasToken = false;
-  g_token[0] = 0; g_pendingToken[0] = 0;
+  // gen++ antes de zerar: um USAGE em voo deste slot é descartado e não
+  // recria o /histN.bin recém-apagado.
+  for (int i = 0; i < ACCT_MAX; i++) { acct_bump_gen(i); acct_clear(i); }
   g_pinAttempts = 0;
   g_lockoutUntil = 0;                        // senao contamina a tela de setup
   g_onboarding = true;
@@ -400,6 +392,22 @@ static void pin_lock_tick() {
   }
 }
 
+// Passo 4 do desbloqueio (item 23): zera tentativas e digitação, carrega os
+// históricos de todos os slots salvos, sobe o servidor da sessão e o agendador.
+static void session_open() {
+  g_pinAttempts = 0; g_lockoutUntil = 0; save_attempts();
+  mbedtls_platform_zeroize(g_pinEntry, sizeof(g_pinEntry));
+  for (int s = 0; s < ACCT_MAX; s++) {
+    if (!g_accts.used[s]) continue;
+    hist_reset_ram(acct[s]);
+    hist_load(s, acct[s]);
+  }
+  g_unlocked = true;
+  web_start_session();
+  scheduler_start();
+  request_state(ST_MAIN);
+}
+
 static void pin_submit() {
   if (g_state == ST_SETUP_PIN) {
     if (!g_pinConfirming) {
@@ -418,40 +426,73 @@ static void pin_submit() {
       if (g_pinMsg) lv_label_set_text(g_pinMsg, TRS("Nao bateu. Defina de novo.", "Didn't match. Set it again."));
       return;
     }
-    // PIN definido -> cifra o token pendente e salva
-    if (!encryptToken(g_pendingToken, g_pinEntry, g_blob)) {
+    // PIN definido (item 23): chave da sessão, cifra o token validado e salva
+    deriveSessionKey(g_pinEntry, g_sessionKey);
+    char buf[TOKEN_BUF_SIZE];
+    if (!token_store_take_pending(buf, sizeof(buf))) {
+      // não há token validado (não deveria acontecer): volta ao token
+      mbedtls_platform_zeroize(g_sessionKey, sizeof(g_sessionKey));
+      g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0;
+      Serial.println("[PIN] sem token validado; de volta ao token");
+      request_state(ST_TOKEN);
+      return;
+    }
+    EncryptedBlob blob;
+    if (!encryptTokenWithKey(buf, g_sessionKey, blob)) {
+      token_store_set_pending(buf);              // devolve à área de validação
+      mbedtls_platform_zeroize(buf, sizeof(buf));
+      mbedtls_platform_zeroize(g_sessionKey, sizeof(g_sessionKey));
       if (g_pinMsg) lv_label_set_text(g_pinMsg, TRS("Falha ao cifrar. Tente de novo.", "Encryption failed. Try again."));
       g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0; pin_update_dots();
       return;
     }
-    accountSave(g_prefs, g_accts, g_tokenTargetSlot, g_blob, g_pendingLabel);
-    accountSetActive(g_prefs, g_accts, g_tokenTargetSlot);
-    acct[g_tokenTargetSlot].usage = g_validatedUsage;   // v2.3: POST /token ja gravava g_usage
+    int slot = g_tokenTargetSlot;
+    accountSave(g_prefs, g_accts, slot, blob, g_pendingLabel);
+    accountSetActive(g_prefs, g_accts, slot);
     g_pendingLabel[0] = 0;
-    strlcpy(g_sessionPin, g_pinEntry, sizeof(g_sessionPin));
-    strlcpy(g_token, g_pendingToken, sizeof(g_token));
-    memset(g_pendingToken, 0, sizeof(g_pendingToken));
-    g_hasToken = true; g_onboarding = false;
-    g_pinAttempts = 0; save_attempts();
+    acct_bump_gen(slot);
+    acct[slot].keyOk = true;
+    token_store_set(slot, (uint16_t)acct[slot].gen, buf);
+    mbedtls_platform_zeroize(buf, sizeof(buf));
+    g_onboarding = false;
     g_pinConfirming = false;
-    memset(g_pinFirst, 0, sizeof(g_pinFirst));   // zera de fato: os digitos ficam
-    memset(g_pinEntry, 0, sizeof(g_pinEntry));   // na RAM se so o [0] for limpo
-    Serial.println("[PIN] token cifrado e salvo");
-    request_state(g_wifi.isConnected() ? ST_LOADING : ST_WIFI);
+    mbedtls_platform_zeroize(g_pinFirst, sizeof(g_pinFirst));
+    Serial.printf("[PIN] token cifrado e salvo no slot %d\n", slot);
+    session_open();
     return;
   }
 
-  // ST_PIN: tenta decifrar
-  if (decryptToken(g_blob, g_pinEntry, g_token, sizeof(g_token))) {
-    g_pinAttempts = 0; g_lockoutUntil = 0; save_attempts();
-    strlcpy(g_sessionPin, g_pinEntry, sizeof(g_sessionPin));
-    memset(g_pinEntry, 0, sizeof(g_pinEntry));
-    Serial.printf("[PIN] ok, token %d chars\n", (int)strlen(g_token));
-    if (!g_wifi.isConnected()) g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS);
-    request_state(g_wifi.isConnected() ? ST_LOADING : ST_WIFI);
-  } else {
+  // ST_PIN: deriva a chave da sessão e abre todos os slots salvos (item 23)
+  deriveSessionKey(g_pinEntry, g_sessionKey);
+  int opened = 0, total = 0;
+  for (int s = 0; s < ACCT_MAX; s++) {
+    if (!g_accts.used[s]) continue;
+    total++;
+    acct[s].keyOk = false;
+    EncryptedBlob b;
+    if (!accountLoadBlob(g_prefs, s, b)) { Serial.printf("[slot %d] sem blob no NVS\n", s); continue; }
+    if (b.len > TOKEN_MAX_LEN) { Serial.printf("[slot %d] token longo demais\n", s); continue; }
+    char tok[TOKEN_BUF_SIZE];
+    if (decryptTokenWithKey(b, g_sessionKey, tok, sizeof(tok))) {
+      acct[s].keyOk = true;
+      token_store_set(s, (uint16_t)acct[s].gen, tok);
+      opened++;
+    }
+    mbedtls_platform_zeroize(tok, sizeof(tok));
+  }
+  if (opened > 0) {
+    Serial.printf("[PIN] ok: %d/%d conta(s) abertas\n", opened, total);
+    for (int s = 0; s < ACCT_MAX; s++)
+      if (g_accts.used[s] && !acct[s].keyOk) Serial.printf("[slot %d] SEM CHAVE (nao decifrou)\n", s);
+    session_open();
+    return;
+  }
+  // nenhum slot abriu: PIN errado
+  mbedtls_platform_zeroize(g_sessionKey, sizeof(g_sessionKey));
+  {
     g_pinAttempts++; save_attempts();
     g_pinEntry[0] = 0; pin_update_dots();
+    Serial.printf("[PIN] errado (%d/%d)\n", g_pinAttempts, MAX_PIN_ATTEMPTS);
     if (g_pinAttempts >= MAX_PIN_ATTEMPTS) {
       Serial.println("[PIN] limite estourado -> wipe");
       factory_reset();
@@ -526,6 +567,8 @@ static void ui_pin() {
 // Tela: WiFi (scan + teclado)
 // ============================================================
 static lv_obj_t *wifi_list = nullptr, *wifi_ta = nullptr, *wifi_kb = nullptr, *wifi_status = nullptr;
+// Sessão: a tela espera a net_task ficar ociosa antes de mexer no rádio.
+static bool g_wifiWaiting = false;
 static char sel_ssid[33] = {0};
 static void wifi_item_cb(lv_event_t *e);
 
@@ -565,7 +608,7 @@ static void wifi_kb_cb(lv_event_t *e) {
     lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
     lv_refr_now(NULL);
     bool ok = g_wifi.connectTo(sel_ssid, pass, 15000);
-    if (ok) request_state(g_onboarding ? ST_TOKEN : ST_LOADING);
+    if (ok) { ensure_mdns(); request_state(g_onboarding ? ST_TOKEN : ST_MAIN); }
     else { lv_label_set_text(wifi_status, TRS("Falhou. Toque numa rede de novo.", "Failed. Tap a network again.")); lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN); }
   } else if (code == LV_EVENT_CANCEL) {
     lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
@@ -581,15 +624,30 @@ static void ui_wifi() {
   lv_obj_t *title = mklabel(scr, TRS("Configurar WiFi", "Configure WiFi"), &lv_font_montserrat_20, C_TEXT);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 12);
 
+  // Sessão: o agendador já está pausado (render_state); espera o job em
+  // andamento terminar antes de escanear. O loop() reabre a tela quando
+  // poller_idle() ficar verdadeiro.
+  g_wifiWaiting = session_unlocked() && !poller_idle();
+  if (g_wifiWaiting) {
+    lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
+                         &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
+    lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 8);
+    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
+    lv_obj_t *w = mklabel(scr, TRS("aguardando a rede...", "waiting for the network..."),
+                          &lv_font_montserrat_16, C_MUTED);
+    lv_obj_align(w, LV_ALIGN_CENTER, 0, 0);
+    return;
+  }
+
   lv_obj_t *rb = mkbtn(scr, TRS("Reescanear", "Rescan"), &lv_font_montserrat_14, C_SURFACE2, C_ACCENT);
   lv_obj_align(rb, LV_ALIGN_TOP_RIGHT, -12, 8);
   lv_obj_add_event_cb(rb, wifi_rescan_cb, LV_EVENT_CLICKED, NULL);
 
-  if (!g_onboarding && g_hasToken) {
+  if (!g_onboarding && session_unlocked()) {
     lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
                          &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
     lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -150, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
+    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
   }
 
   wifi_status = mklabel(scr, "...", &lv_font_montserrat_14, C_MUTED);
@@ -624,10 +682,9 @@ static void ui_wifi() {
 static lv_obj_t *g_tokMsg = nullptr;            // status na tela do device
 
 static void web_token_msg_cb(const char *m) {
-  if (g_tokMsg) { lv_label_set_text(g_tokMsg, m); lv_refr_now(NULL); }
+  if (g_tokMsg) lv_label_set_text(g_tokMsg, m);
 }
 static void web_tok_stats_cb() { update_tok_row(); }
-static void web_token_ok_cb() { g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0; }
 
 static void anim_opa_cb(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
 
@@ -647,14 +704,13 @@ static lv_obj_t *build_claude_mark(lv_obj_t *parent) {
 }
 
 static void ui_token() {
-  stop_web();
   lv_obj_t *scr = lv_screen_active();
 
-  if (!g_onboarding && g_hasToken) {
+  if (session_unlocked()) {
     lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
                          &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
     lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
+    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
   }
 
   lv_obj_t *mark = build_claude_mark(scr);
@@ -685,113 +741,72 @@ static void ui_token() {
   g_tokMsg = mklabel(scr, TRS("aguardando o token...", "waiting for the token..."), &lv_font_montserrat_14, C_MUTED);
   lv_obj_align(g_tokMsg, LV_ALIGN_BOTTOM_MID, 0, -14);
 
-  web_start_onboarding();
+  // Item 6: a sessão já tem servidor (web_start_session); o onboarding sobe o
+  // dele aqui, se ainda não houver. A validação é assíncrona (VALIDATE).
+  web_token_begin();
+  if (!session_unlocked() && !web_running()) web_start_onboarding();
 }
 
-// ============================================================
-// Tela: loading / mensagem
-// ============================================================
-static void ui_message(const char *title, const char *sub, uint32_t color) {
-  lv_obj_t *scr = lv_screen_active();
-  lv_obj_t *t = mklabel(scr, title, &lv_font_montserrat_24, color);
-  lv_obj_align(t, LV_ALIGN_CENTER, 0, -16);
-  if (sub && sub[0]) {
-    lv_obj_t *s = mklabel(scr, sub, &lv_font_montserrat_16, C_MUTED);
-    lv_obj_align(s, LV_ALIGN_CENTER, 0, 20);
-  }
-}
-// Tela de falha do primeiro load. Toque em qualquer lugar tenta de novo — e o
-// loop() ainda re-tenta sozinho a cada 15s (falha de rede/NTP costuma passar).
-static void ui_error() {
-  const UsageData &u = acct[g_accts.active].usage;
-  ui_message(TRS("Falha", "Failed"),
-             u.error[0] ? u.error : TRS("sem dados", "no data"), C_BAD);
-  lv_obj_t *scr = lv_screen_active();
-  lv_obj_t *h = mklabel(scr, TRS("toque para tentar de novo", "tap to retry"),
-                        &lv_font_montserrat_14, C_MUTED);
-  lv_obj_align(h, LV_ALIGN_CENTER, 0, 56);
-  lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(scr, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_LOADING);
-}
-
-static void ui_loading(const char *sub) {
-  lv_obj_t *scr = lv_screen_active();
-  lv_obj_t *mark = build_claude_mark(scr);
-  lv_obj_align(mark, LV_ALIGN_CENTER, 0, -50);
-  lv_obj_t *t = mklabel(scr, TRS("Carregando seu uso...", "Loading your usage..."), &lv_font_montserrat_18, C_TEXT);
-  lv_obj_align(t, LV_ALIGN_CENTER, 0, 28);
-  if (sub && sub[0]) {
-    lv_obj_t *s = mklabel(scr, sub, &lv_font_montserrat_12, C_MUTED);
-    lv_obj_align(s, LV_ALIGN_CENTER, 0, 52);
-  }
-  lv_obj_t *spn = lv_spinner_create(scr);
-  lv_spinner_set_anim_params(spn, 1200, 70);
-  lv_obj_set_size(spn, 34, 34);
-  lv_obj_align(spn, LV_ALIGN_CENTER, 0, 90);
-  lv_obj_set_style_arc_color(spn, lv_color_hex(C_SURFACE2), LV_PART_MAIN);
-  lv_obj_set_style_arc_color(spn, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
-  lv_obj_set_style_arc_width(spn, 4, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(spn, 4, LV_PART_INDICATOR);
-}
-
-static bool switch_account(int slot) {
-  if (slot < 0 || slot >= ACCT_MAX || !g_accts.used[slot] || slot == g_accts.active)
-    return false;
-  EncryptedBlob b;
-  if (!accountLoadBlob(g_prefs, slot, b)) return false;
-  char tok[200];
-  if (!decryptToken(b, g_sessionPin, tok, sizeof(tok))) return false;
-
-  hist_save(g_accts.active, acct[g_accts.active]);
-  accountSetActive(g_prefs, g_accts, slot);
-  g_blob = b;
-  strlcpy(g_token, tok, sizeof(g_token));
-  memset(tok, 0, sizeof(tok));
-  AccountState &a = acct[slot];
-  hist_reset_ram(a);
-  hist_load(slot, a);
-  memset(&a.tok, 0, sizeof(a.tok));
-  memset(&a.usage, 0, sizeof(a.usage));
-  Serial.printf("[ACCT] conta ativa -> slot %d (%s)\n", slot, g_accts.label[slot]);
-  request_state(ST_LOADING);
-  return true;
-}
-
-static void finalize_pending_token() {
-  EncryptedBlob nb;
-  if (!encryptToken(g_pendingToken, g_sessionPin, nb)) {
-    memset(g_pendingToken, 0, sizeof(g_pendingToken));
-    request_state(ST_SETTINGS);
+// Resultado do VALIDATE (hook onValidate do poller; item 6, passos 4, 7 e 8).
+static void on_validate_result(const NetResult &r) {
+  if (r.cls == FC_DISCARDED || r.gen != web_token_seq()) {
+    Serial.printf("[TOKEN] resultado ignorado (seq %u, atual %u, cls %s)\n", (unsigned)r.gen,
+                  (unsigned)web_token_seq(), fetch_class_name(r.cls));
     return;
   }
-  bool replacing = g_accts.used[g_tokenTargetSlot];
-  bool switching = (g_tokenTargetSlot != g_accts.active);
-  if (switching) hist_save(g_accts.active, acct[g_accts.active]);
-  const char *lbl = g_pendingLabel[0] ? g_pendingLabel
-                    : (replacing ? g_accts.label[g_tokenTargetSlot] : "");
-  accountSave(g_prefs, g_accts, g_tokenTargetSlot, nb, lbl);
-  AccountState &a = acct[g_tokenTargetSlot];
-  if (switching) {
-    accountSetActive(g_prefs, g_accts, g_tokenTargetSlot);
-    hist_reset_ram(a);
-    hist_load(g_tokenTargetSlot, a);
-    memset(&a.tok, 0, sizeof(a.tok));
+  if (r.cls != FC_OK) {
+    token_store_clear_pending();
+    char reason[12];
+    strlcpy(reason, fetch_class_name(r.cls), sizeof(reason));
+    for (char *c = reason; *c; c++) *c = (char)tolower((unsigned char)*c);
+    web_token_set_result(false, reason);
+    Serial.printf("[TOKEN] recusado: %s (http %d)\n", fetch_class_name(r.cls), r.http);
+    char m[64];
+    snprintf(m, sizeof(m), TRS("token recusado (%s), tente de novo", "token rejected (%s), try again"),
+             fetch_class_name(r.cls));
+    web_token_msg_cb(m);
+    return;
   }
-  g_blob = nb;
-  strlcpy(g_token, g_pendingToken, sizeof(g_token));
-  memset(g_pendingToken, 0, sizeof(g_pendingToken));
+
+  if (!session_unlocked()) {               // onboarding (passo 7)
+    web_token_set_result(true, nullptr);
+    g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0;
+    Serial.println("[TOKEN] validado; defina o PIN");
+    web_token_msg_cb(TRS("token OK! defina o PIN", "token OK! set the PIN"));
+    if (g_state == ST_TOKEN) request_state(ST_SETUP_PIN);
+    return;
+  }
+
+  // sessão desbloqueada: adicionar ou trocar conta (passo 8)
+  int slot = g_tokenTargetSlot;
+  if (slot < 0 || slot >= ACCT_MAX) { token_store_clear_pending(); web_token_set_result(false, "err"); return; }
+  bool replacing = g_accts.used[slot];
+  char buf[TOKEN_BUF_SIZE];
+  if (!token_store_take_pending(buf, sizeof(buf))) { web_token_set_result(false, "err"); return; }
+  EncryptedBlob blob;
+  if (!encryptTokenWithKey(buf, g_sessionKey, blob)) {
+    mbedtls_platform_zeroize(buf, sizeof(buf));
+    g_pendingLabel[0] = 0;
+    web_token_set_result(false, "crypto");
+    web_token_msg_cb(TRS("falha ao cifrar, tente de novo", "encryption failed, try again"));
+    return;
+  }
+  char lbl[ACCT_LBL_MAX];
+  strlcpy(lbl, g_pendingLabel[0] ? g_pendingLabel : (replacing ? g_accts.label[slot] : ""), sizeof(lbl));
+  accountSave(g_prefs, g_accts, slot, blob, lbl);
+  accountSetActive(g_prefs, g_accts, slot);
+  acct_bump_gen(slot);
+  acct[slot].keyOk = true;
+  token_store_set(slot, (uint16_t)acct[slot].gen, buf);
+  mbedtls_platform_zeroize(buf, sizeof(buf));
+  if (!replacing) { hist_reset_ram(acct[slot]); hist_load(slot, acct[slot]); }
+  acct_reset_runtime(slot);
   g_pendingLabel[0] = 0;
-  g_hasToken = true;
-  g_lastOkMs = g_lastPollMs = millis();
-  g_lastFetchOk = true;
-  a.usage = g_validatedUsage;                 // validado por POST /token
-  uint32_t now = (uint32_t)time(nullptr);
-  hist_push(a, a.usage.h5, a.usage.d7, now);
-  accumulate_heat(a, a.usage.h5, now, g_tzOffset * 3600);
-  hist_save(g_tokenTargetSlot, a);
-  Serial.printf("[ACCT] token salvo no slot %d (%s)\n",
-                g_tokenTargetSlot, g_accts.label[g_tokenTargetSlot]);
+  web_token_set_result(true, nullptr);
+  Serial.printf("[ACCT] token %s no slot %d (%s)\n", replacing ? "trocado" : "adicionado",
+                slot, g_accts.label[slot]);
   request_state(ST_MAIN);
+  scheduler_request_refresh();
 }
 
 // ============================================================
@@ -1350,7 +1365,6 @@ struct MomentUI {
 };
 static MomentUI g_mo = {};
 static uint32_t g_momentUntil = 0;
-static int g_pendWin = -1, g_pendThr = 0;      // momento aguardando exibição
 static lv_point_precise_t g_moXPts[4][2];      // olhos em X (KO)
 
 static void moment_close() {
@@ -1358,9 +1372,20 @@ static void moment_close() {
   lv_obj_delete(g_mo.scrim);
   memset(&g_mo, 0, sizeof(g_mo));
 }
-static void moment_close_cb(lv_event_t *e) { (void)e; moment_close(); }
+// Fechar pelo toque ou pelo tempo mostra o próximo momento guardado pelo
+// agendador (moment_flush). moment_close() sozinho não chama: render_state()
+// e show_moment() também o usam para limpar a tela.
+static void moment_close_cb(lv_event_t *e) { (void)e; moment_close(); moment_flush(); }
 
-static void show_moment(int win, int thr) {
+// Hook do agendador (fase 2): só mostra na tela inicial, sem outro momento
+// aberto e sem rebuild pendente (que fecharia o overlay).
+static bool moment_hook(int slot, int win, int thr) {
+  if (g_mo.scrim || g_state != ST_MAIN || g_dirty) return false;
+  show_moment(slot, win, thr);
+  return true;
+}
+
+static void show_moment(int slot, int win, int thr) {
   moment_close();
   g_mo.win = win; g_mo.thr = thr;
   g_mo.fromPct = (thr == 25) ? 0 : (thr == 50) ? 25 : (thr == 70) ? 50 : 70;
@@ -1463,7 +1488,7 @@ static void show_moment(int win, int thr) {
     g_mo.seg[i] = rrect(s, 240 + i * 11, 196, 8, 16, 2, C_TRACK);
 
   char e[32], b[48];
-  const UsageData &u = acct[g_accts.active].usage;
+  const UsageData &u = acct[(slot >= 0 && slot < ACCT_MAX) ? slot : g_accts.active].usage;
   fmt_eta(win == 0 ? u.h5ResetEpoch : u.d7ResetEpoch, e, sizeof(e));
   snprintf(b, sizeof(b), TRS("reseta em %s", "resets in %s"), e);
   lv_obj_t *eta = mklabel(s, b, &lv_font_montserrat_14, C_FAINT);
@@ -1511,7 +1536,7 @@ static void moment_tick() {
   if (g_mo.ring)
     lv_obj_set_style_border_opa(g_mo.ring, ((t / 350) % 2) ? 190 : 30, 0);
 
-  if (millis() > g_momentUntil) moment_close();
+  if (millis() > g_momentUntil) { moment_close(); moment_flush(); }
 }
 
 // ============================================================
@@ -1709,29 +1734,31 @@ static void refresh_ui_values() {
   dash_tick();
 }
 
-// Atualiza o texto de status do cabeçalho (sem trocar de tela)
+// Conta salva cuja última tentativa falhou (ou que não decifrou).
+static bool slot_failed(int s) {
+  if (!g_accts.used[s]) return false;
+  if (!acct[s].keyOk) return true;
+  FetchClass c = acct[s].lastClass;
+  return c != FC_NONE && c != FC_OK;
+}
+
+// Status do cabeçalho (fase 2, até sair na fase 3): "ok" ou "K com falha".
 static void set_hdr_status() {
   if (!g_hdrStatus) return;
-  char buf[40]; uint32_t color;
-  if (g_refreshing)        { strcpy(buf, TRS("atualizando...", "updating..."));      color = C_ACCENT; }
-  else if (!g_lastFetchOk) { strcpy(buf, TRS("falha ao atualizar", "update failed")); color = C_BAD; }
-  else {
-    uint32_t s = (millis() - g_lastOkMs) / 1000;
-    if (s < 60) snprintf(buf, sizeof(buf), TRS("atualizado ha %us", "updated %us ago"), (unsigned)s);
-    else        snprintf(buf, sizeof(buf), TRS("atualizado ha %umin", "updated %um ago"), (unsigned)(s / 60));
-    color = C_MUTED;
-  }
+  int k = 0;
+  for (int s = 0; s < ACCT_MAX; s++) if (slot_failed(s)) k++;
+  char buf[40];
+  if (k == 0) strlcpy(buf, "ok", sizeof(buf));
+  else snprintf(buf, sizeof(buf), TRS("%d com falha", "%d failing"), k);
   lv_label_set_text(g_hdrStatus, buf);
-  lv_obj_set_style_text_color(g_hdrStatus, lv_color_hex(color), 0);
+  lv_obj_set_style_text_color(g_hdrStatus, lv_color_hex(k ? C_BAD : C_MUTED), 0);
 }
-// Botão de refresh: só pede; a busca acontece em background no loop()
-static void refresh_cb(lv_event_t *e) { (void)e; g_wantRefresh = true; }
+// Botão de refresh: só pede; o ciclo roda na net_task.
+static void refresh_cb(lv_event_t *e) { (void)e; scheduler_request_refresh(); }
 
 static void ui_main() {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
-
-  start_data_web();
 
   // Header: Clawd + logotipo (duplo toque em QUALQUER um = demo das animacoes),
   // botao de ATUALIZAR visivel no centro, engrenagem grande a direita.
@@ -1755,7 +1782,7 @@ static void ui_main() {
     uint32_t now = millis();
     if (now - lastClick < 450) {
       static const int T[4] = {25, 50, 70, 100};
-      show_moment((di / 4) % 2, T[di % 4]);
+      show_moment(g_accts.active, (di / 4) % 2, T[di % 4]);
       di++;
       lastClick = 0;
     } else {
@@ -1792,19 +1819,6 @@ static void ui_main() {
   lv_obj_set_ext_click_area(gear, 16);
   lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -6, 2);
   lv_obj_add_event_cb(gear, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_SETTINGS);
-
-  // Barra fina decrescente do próximo refresh (só indicador; o botão de
-  // atualizar fica no centro do header — clique aqui causava refresh acidental)
-  g_ui.refBar = lv_bar_create(scr);
-  lv_obj_set_size(g_ui.refBar, 480, 3);
-  lv_obj_set_pos(g_ui.refBar, 0, 40);
-  lv_bar_set_range(g_ui.refBar, 0, 1000);
-  lv_bar_set_value(g_ui.refBar, 1000, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(g_ui.refBar, lv_color_hex(C_SURFACE), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(g_ui.refBar, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
-  lv_obj_set_style_radius(g_ui.refBar, 0, LV_PART_MAIN);
-  lv_obj_set_style_radius(g_ui.refBar, 0, LV_PART_INDICATOR);
-  lv_obj_clear_flag(g_ui.refBar, LV_OBJ_FLAG_CLICKABLE);
 
   // Telas (swipe horizontal)
   g_ui.tv = lv_tileview_create(scr);
@@ -1853,7 +1867,7 @@ static int g_acctDelArmed = -1;
 static void settings_action_cb(lv_event_t *e) {
   int act = (int)(intptr_t)lv_event_get_user_data(e);
   switch (act) {
-    case 0: request_state(ST_LOADING); break;          // atualizar
+    case 0: scheduler_request_refresh(); request_state(ST_MAIN); break;   // atualizar
     case 1: g_onboarding = false; request_state(ST_WIFI); break;
     case 2:                                            // trocar token
       g_tokenTargetSlot = g_accts.active;
@@ -1901,7 +1915,7 @@ static void settings_action_cb(lv_event_t *e) {
       for (int i = 0; i < NTZ; i++) if (TZ_OPTS[i] == g_tzOffset) idx = i;
       g_tzOffset = TZ_OPTS[(idx + 1) % NTZ];
       g_prefs.putInt("tz", g_tzOffset);
-      apply_tz();
+      scheduler_apply_tz();
       if (g_tzLbl) {
         char m[40];
         snprintf(m, sizeof(m), TRS(LV_SYMBOL_GPS "  Fuso: GMT%+d",
@@ -1948,7 +1962,6 @@ static void add_setting_row(lv_obj_t *p, const char *txt, int act, uint32_t fg, 
 static void ui_settings() {
   lv_obj_t *scr = lv_screen_active();
   g_wipeArmed = false;
-  start_data_web();
   lv_obj_t *title = mklabel(scr, TRS("Ajustes", "Settings"), &lv_font_montserrat_20, C_TEXT);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
 
@@ -1957,7 +1970,7 @@ static void ui_settings() {
   lv_obj_set_size(bk, 100, 32);
   lv_obj_set_ext_click_area(bk, 6);
   lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
+  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
 
   // lista rolável
   lv_obj_t *lst = lv_obj_create(scr);
@@ -2009,12 +2022,17 @@ static void ui_settings() {
                            LV_SYMBOL_TRASH "  Erase everything"), 4, C_BAD, &g_wipeLbl);
 }
 
+// Trocar o foco não decifra nada (item 23): todas as contas já estão abertas.
 static void acct_switch_cb(lv_event_t *e) {
   int slot = (int)(intptr_t)lv_event_get_user_data(e);
   g_acctDelArmed = -1;
   if (slot == g_accts.active) return;
-  if (!switch_account(slot)) request_state(ST_ACCOUNTS);
+  accountSetActive(g_prefs, g_accts, slot);
+  Serial.printf("[ACCT] foco -> slot %d (%s)\n", slot, g_accts.label[slot]);
+  request_state(ST_MAIN);
 }
+// Remover (item 23): gen++ e token zerado; a fila não é esvaziada e a task não
+// é esperada — um resultado atrasado deste slot é descartado pelo gen.
 static void acct_del_cb(lv_event_t *e) {
   int slot = (int)(intptr_t)lv_event_get_user_data(e);
   if (accountCount(g_accts) <= 1) return;
@@ -2024,27 +2042,13 @@ static void acct_del_cb(lv_event_t *e) {
     return;
   }
   g_acctDelArmed = -1;
-  bool wasActive = (slot == g_accts.active);
   accountRemove(g_prefs, g_accts, slot);
+  acct_bump_gen(slot);
+  token_store_clear(slot, (uint16_t)acct[slot].gen);
   char pth[16]; hist_path(slot, pth, sizeof(pth));
   LittleFS.remove(pth);
   acct_clear(slot);
-  if (wasActive) {
-    EncryptedBlob b; char tok[200];
-    if (accountLoadBlob(g_prefs, g_accts.active, b) &&
-        decryptToken(b, g_sessionPin, tok, sizeof(tok))) {
-      g_blob = b;
-      strlcpy(g_token, tok, sizeof(g_token));
-      memset(tok, 0, sizeof(tok));
-      AccountState &a = acct[g_accts.active];
-      hist_reset_ram(a);
-      hist_load(g_accts.active, a);
-      memset(&a.tok, 0, sizeof(a.tok));
-      memset(&a.usage, 0, sizeof(a.usage));
-      request_state(ST_LOADING);
-      return;
-    }
-  }
+  Serial.printf("[ACCT] slot %d removido (gen %u)\n", slot, (unsigned)acct[slot].gen);
   request_state(ST_ACCOUNTS);
 }
 static void acct_add_cb(lv_event_t *e) {
@@ -2107,7 +2111,6 @@ static void ui_account_name() {
 
 static void ui_accounts() {
   lv_obj_t *scr = lv_screen_active();
-  start_data_web();
 
   lv_obj_t *title = mklabel(scr, TRS("Contas", "Accounts"), &lv_font_montserrat_20, C_TEXT);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
@@ -2188,8 +2191,8 @@ static void ui_accounts() {
     lv_obj_add_event_cb(add, acct_add_cb, LV_EVENT_CLICKED, NULL);
   }
 
-  lv_obj_t *hint = mklabel(scr, TRS("So a conta ativa e consultada na API (as outras ficam dormentes).",
-                                    "Only the active account is polled (the others stay dormant)."),
+  lv_obj_t *hint = mklabel(scr, TRS("Todas as contas sao consultadas; a ativa tambem sonda os modelos.",
+                                    "All accounts are polled; the active one also probes the models."),
                            &lv_font_montserrat_12, C_FAINT);
   lv_obj_set_width(hint, 452);
   lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -2201,7 +2204,6 @@ static void ui_accounts() {
 // ============================================================
 static void ui_about() {
   lv_obj_t *scr = lv_screen_active();
-  start_data_web();
 
   lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
                        &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
@@ -2256,8 +2258,14 @@ static void nav_cb(lv_event_t *e) {
 // Render do estado atual
 // ============================================================
 static void render_state() {
+  State prev = g_state;
   g_state = g_pending;
-  stop_web();                                 // cada tela sobe o servidor que precisa
+  // O servidor web não cai mais a cada tela (item 24): só o estado da
+  // validação do token fecha junto com a tela de token.
+  if (prev == ST_TOKEN && g_state != ST_TOKEN) web_token_reset();
+  // Tela de WiFi da sessão: sem jobs enquanto ela mexe no rádio.
+  if (prev == ST_WIFI && g_state != ST_WIFI) scheduler_resume();
+  if (g_state == ST_WIFI && session_unlocked()) scheduler_pause();
   moment_close();                             // overlay vive em lv_layer_top
   lv_obj_clean(lv_layer_top());
   g_incDlg = nullptr;                         // dialog de incidente idem
@@ -2279,118 +2287,14 @@ static void render_state() {
     case ST_SETUP_PIN: ui_pin(); break;
     case ST_WIFI:      ui_wifi(); break;
     case ST_TOKEN:     ui_token(); break;
-    case ST_LOADING:   ui_loading(g_wifi.isConnected() ? g_wifi.getSSID().c_str()
-                                                       : TRS("conectando WiFi", "connecting WiFi")); break;
     case ST_MAIN:      ui_main(); break;
     case ST_SETTINGS:  ui_settings(); break;
     case ST_ACCOUNTS:  ui_accounts(); break;
     case ST_ACCT_NAME: ui_account_name(); break;
     case ST_ABOUT:     ui_about(); break;
-    case ST_ERROR:     ui_error(); break;
     default: break;
   }
-}
-
-// ============================================================
-// Tempo (NTP) e ciclo de dados
-// ============================================================
-static void apply_tz() { configTime(g_tzOffset * 3600, 0, NTP_SERVER_1, NTP_SERVER_2); }
-static void ensure_time() {
-  if (g_timeInit || !g_wifi.isConnected()) return;
-  apply_tz();
-  g_timeInit = true;
-  Serial.println("[NTP] sync iniciado");
-}
-
-// A validacao do certificado TLS compara as datas do cert com o relogio do
-// device. Disparar o fetch antes do NTP chegar devolve http_-1 (handshake
-// recusado), e ate a v2.3 isso jogava o boot direto na tela de erro sem volta.
-static bool wait_for_time(uint32_t timeoutMs) {
-  ensure_time();
-  uint32_t t0 = millis();
-  while (time(nullptr) < 1000000000L && millis() - t0 < timeoutMs) {
-    lv_task_handler();
-    delay(50);
-  }
-  bool ok = time(nullptr) > 1000000000L;
-  Serial.printf("[NTP] relogio %s em %ums\n", ok ? "pronto" : "SEM SYNC",
-                (unsigned)(millis() - t0));
-  return ok;
-}
-
-// Consulta de uso com PROBE_MODEL, com o log da v2.3. Sai na fase 2 (item 24),
-// quando as consultas passam para a net_task.
-static bool fetch_usage_v23(const char *tok, UsageData &out) {
-  int http; uint16_t ms;
-  bool ok = fetchUsage(tok, PROBE_MODEL, out, &http, &ms);
-  Serial.printf("[API] HTTP %d (%ums) %s\n", http, (unsigned)ms, ok ? "ok" : out.error);
-  return ok;
-}
-
-// Sonda o próximo modelo da rotação.
-static void probe_next_model() {
-  int mi = g_probeIdx % NMODELS;
-  g_probeIdx++;
-  UsageData tmp = {};
-  int http; uint16_t ms;
-  fetchUsage(g_token, g_models[mi].id, tmp, &http, &ms);
-  g_models[mi].pr.code = http;
-  g_models[mi].pr.ms = ms;
-  Serial.printf("[PROBE] %s -> HTTP %d (%ums)\n", g_models[mi].id, http, (unsigned)ms);
-  g_models[mi].atMs = millis();
-}
-
-// Primeiro load (mostra a tela de carregamento). Vai p/ ST_MAIN ou ST_ERROR.
-static void do_refresh() {
-  wait_for_time(10000);
-  int slot = g_accts.active;
-  AccountState &a = acct[slot];
-  bool ok = fetch_usage_v23(g_token, a.usage);
-  if (ok) {
-    fetchModelStatus(g_status); g_lastOkMs = millis(); g_lastFetchOk = true;
-    uint32_t now = (uint32_t)time(nullptr);
-    hist_push(a, a.usage.h5, a.usage.d7, now);
-    accumulate_heat(a, a.usage.h5, now, g_tzOffset * 3600);
-    hist_save(slot, a);
-    ThrHit h = check_thresholds(a);
-    if (h.win >= 0) { g_pendWin = h.win; g_pendThr = h.thr; }
-    probe_next_model();
-  } else g_lastFetchOk = false;
-  g_lastPollMs = millis();
-  request_state(ok ? ST_MAIN : ST_ERROR);
-}
-
-// Atualização EM BACKGROUND: não troca de tela; mantém o dashboard e os dados
-// antigos se falhar. A chamada à API é bloqueante (~1-2s), então mostra
-// "atualizando..." no cabeçalho durante a busca.
-static void bg_refresh() {
-  if (!g_wifi.isConnected()) g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS);
-  ensure_time();
-  g_refreshing = true; set_hdr_status(); lv_refr_now(NULL);
-  UsageData u = {};
-  bool ok = fetch_usage_v23(g_token, u);
-  bool rebuild = false;
-  if (ok) {
-    int slot = g_accts.active;
-    AccountState &a = acct[slot];
-    a.usage = u; g_lastOkMs = millis(); g_lastFetchOk = true;
-    uint32_t now = (uint32_t)time(nullptr);
-    hist_push(a, u.h5, u.d7, now);
-    accumulate_heat(a, u.h5, now, g_tzOffset * 3600);
-    hist_save(slot, a);
-    ThrHit h = check_thresholds(a);
-    if (h.win >= 0) { g_pendWin = h.win; g_pendThr = h.thr; }
-    int moodBefore[NMODELS];
-    for (int i = 0; i < NMODELS; i++) moodBefore[i] = model_mood(i);
-    fetchModelStatus(g_status);
-    probe_next_model();
-    for (int i = 0; i < NMODELS; i++)
-      if (moodBefore[i] != model_mood(i)) rebuild = true;   // mascote muda de humor
-  } else g_lastFetchOk = false;
-  g_refreshing = false;
-  g_lastPollMs = millis();
-  if (rebuild) request_state(ST_MAIN);    // mascotes mudaram -> rebuild
-  else refresh_ui_values();               // resto: in-place (preserva o tile atual)
+  if (g_state == ST_MAIN) moment_flush();     // momento guardado durante outra tela
 }
 
 // ============================================================
@@ -2429,20 +2333,27 @@ void setup() {
 
   load_persisted();
   apply_brightness();
+  Serial.printf("[BOOT] fw %s reset_reason=%d\n", FW_VERSION, (int)esp_reset_reason());
+  if (g_prefs.isKey("lastReset")) {             // motivo gravado por poller_check_stuck()
+    String lr = g_prefs.getString("lastReset", "");
+    Serial.printf("[BOOT] lastReset=%s\n", lr.c_str());
+    g_prefs.remove("lastReset");
+  }
 
   if (!LittleFS.begin(true)) Serial.println("LittleFS: falhou");
-  else {
-    hist_migrate_legacy();
-    hist_load(g_accts.active, acct[g_accts.active]);
-  }
+  else hist_migrate_legacy();       // os históricos carregam no desbloqueio (item 23)
 
   web_on_token_msg(web_token_msg_cb);
   web_on_tok_stats(web_tok_stats_cb);
-  web_on_token_ok(web_token_ok_cb);
 
+  token_store_init();               // antes da net_task existir
   g_wifi.begin();
+  poller_start();                   // VALIDATE já no onboarding (item 6)
+  PollerHooks hooks = {incident_sync, on_validate_result, ensure_mdns};
+  poller_set_hooks(hooks);
+  scheduler_set_moment_hook(moment_hook);
 
-  if (g_hasToken) {
+  if (has_accounts()) {
     // Tenta WiFi cedo (em paralelo o usuário digita o PIN)
     g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS);
     request_state(ST_PIN);
@@ -2453,33 +2364,41 @@ void setup() {
   }
 }
 
-void loop() {
-  lv_task_handler();
-
-  // Servidor web (token no onboarding; /window + /tokens no dashboard)
-  web_api_poll();
-  if (g_state == ST_TOKEN && g_tokenGot) {
-    g_tokenGot = false;
-    if (g_onboarding || !g_sessionPin[0]) request_state(ST_SETUP_PIN);
-    else finalize_pending_token();
+// Chegou resultado da net_task com a tela inicial aberta: valores no lugar e,
+// se algum mascote mudou de humor, só o tile de modelos é refeito (um rebuild
+// da tela inteira fecharia o overlay de momento e voltaria ao tile 0).
+static void ui_apply_results() {
+  bool moodChanged = false;
+  for (int i = 0; i < g_mascN; i++) if (g_masc[i].mood != model_mood(i)) moodChanged = true;
+  if (moodChanged && g_ui.tile[1]) {
+    lv_obj_clean(g_ui.tile[1]);
+    g_mascN = 0;
+    memset(g_ui.mChip, 0, sizeof(g_ui.mChip));
+    build_tile_models(g_ui.tile[1]);
   }
+  refresh_ui_values();
+}
+
+void loop() {
+  // Ordem do item 2 (fase 2), em todos os estados, antes e depois do desbloqueio
+  lv_timer_handler();
+  web_api_poll();
+  bool changed = poller_apply_results();
+  scheduler_tick();
+  poller_check_stuck();
+  if (changed) g_uiDirty = true;
 
   if (g_dirty) {
     g_dirty = false;
     render_state();
-    if (g_state == ST_LOADING) {
-      lv_task_handler();
-      lv_refr_now(NULL);
-      do_refresh();
-    }
+  }
+  if (g_uiDirty) {
+    g_uiDirty = false;
+    if (g_state == ST_MAIN) ui_apply_results();
   }
 
-  // Poll automático EM BACKGROUND (sem trocar de tela) + refresh manual
-  if (g_state == ST_MAIN &&
-      (g_wantRefresh || millis() - g_lastPollMs > (uint32_t)g_pollSec * 1000)) {
-    g_wantRefresh = false;
-    bg_refresh();           // seta g_lastPollMs no fim
-  }
+  // Tela de WiFi da sessão esperando a net_task terminar o job em andamento.
+  if (g_state == ST_WIFI && g_wifiWaiting && poller_idle()) request_state(ST_WIFI);
 
   // Contagem do bloqueio por PIN errado. 250ms para o segundo virar sem atraso
   // visivel; o tick so reescreve o label quando o valor muda. So ST_PIN: o
@@ -2489,30 +2408,13 @@ void loop() {
     if (millis() - lastLock > 250) { lastLock = millis(); pin_lock_tick(); }
   }
 
-  // Falha no primeiro load nao pode ser terminal: o poll automatico so roda em
-  // ST_MAIN, entao sem isto a placa fica presa na tela de erro ate o reset.
-  if (g_state == ST_ERROR && millis() - g_lastPollMs > 15000) {
-    g_lastPollMs = millis();
-    request_state(ST_LOADING);
-  }
-
-  // Atualização viva: contadores (1s), barra de refresh (250ms), mascotes,
+  // Atualização viva: contadores (1s), mascotes,
   // slideshow (5s, pausa 10s após qualquer toque)
   if (g_state == ST_MAIN) {
     uint32_t now = millis();
-    static uint32_t lastTick = 0, lastBar = 0, lastBob = 0, blinkAt = 0;
+    static uint32_t lastTick = 0, lastBob = 0, blinkAt = 0;
     static bool blinkClosed = false;
     if (now - lastTick > 1000) { lastTick = now; dash_tick(); update_tok_row(); }
-    if (now - lastBar > 250 && g_ui.refBar) {
-      lastBar = now;
-      int v;
-      if (g_refreshing) v = 1000;
-      else {
-        uint32_t el = now - g_lastPollMs, per = (uint32_t)g_pollSec * 1000;
-        v = el >= per ? 0 : (int)(1000 - (uint64_t)el * 1000 / per);
-      }
-      lv_bar_set_value(g_ui.refBar, v, LV_ANIM_OFF);
-    }
     if (now - lastBob > 80) {                       // animação por humor
       lastBob = now;
       float ph = now / 600.0f;
@@ -2542,18 +2444,14 @@ void loop() {
         }
       }
     }
-    if (g_slideSec > 0 && g_ui.tv && !g_refreshing && !g_mo.scrim && !g_incDlg &&
+    if (g_slideSec > 0 && g_ui.tv && !g_mo.scrim && !g_incDlg &&
         now - g_lastTouchMs > 10000 && now - g_lastSlideMs > (uint32_t)g_slideSec * 1000) {
       g_lastSlideMs = now;
       int next = (g_curTile + 1) % NTILES;
       lv_tileview_set_tile_by_index(g_ui.tv, next, 0, LV_ANIM_ON);
     }
 
-    // Momentos de limiar: mostra pendente e anima o overlay ativo
-    if (g_pendWin >= 0 && !g_mo.scrim && !g_refreshing) {
-      show_moment(g_pendWin, g_pendThr);
-      g_pendWin = -1;
-    }
+    // Momento de limiar aberto (o agendador decide quando abrir: moment_flush)
     if (g_mo.scrim) moment_tick();
   }
 
