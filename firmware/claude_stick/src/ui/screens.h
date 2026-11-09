@@ -58,8 +58,10 @@ void screen_pin_reset();
 // ---- WiFi: tela cheia no onboarding (ST_WIFI) ou conteúdo WIFI na sessão ----
 void screen_wifi_full();                 // ST_WIFI
 void screen_wifi_build(lv_obj_t* parent);
-// Conteúdo WIFI: reabre quando a net_task terminou o job em andamento.
+// Conteúdo WIFI / ST_WIFI: reabre quando a net_task terminou o job em
+// andamento (até lá a tela só mostra "aguardando a rede…").
 void screen_wifi_tick();
+void screen_wifi_full_tick();
 void screen_wifi_reset();
 
 // ---- Token: tela cheia no onboarding (ST_TOKEN) ou conteúdo TOKEN ----

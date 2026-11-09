@@ -1,7 +1,9 @@
 // WiFi (item 39): scan + senha. Tela cheia no onboarding (ST_WIFI, moldura
-// THEP) ou conteúdo WIFI do shell na sessão. Na sessão o agendador já está
-// pausado (app_state, ao abrir WIFI): a tela mostra "aguardando a rede…" até
-// a net_task terminar o job em andamento e só então mexe no rádio.
+// THEP) ou conteúdo WIFI do shell na sessão. Nos dois casos o agendador já
+// está parado (app_state pausa ao abrir WIFI ou ST_WIFI; o factory_reset que
+// leva ao ST_WIFI chama scheduler_stop): a tela mostra "aguardando a rede…"
+// até a net_task terminar o job em andamento (o RECONNECT do boot, um ciclo
+// interrompido pelo Apagar tudo) e só então mexe no rádio.
 #include <Arduino.h>
 #include <WiFi.h>
 #include <string.h>
@@ -102,7 +104,8 @@ void rescan_cb(lv_event_t* e) {
 void build(lv_obj_t* p, int h, bool inShell) {
   const lv_font_t* f11 = theme_font(FONT_11);
 
-  s_waiting = inShell && !poller_idle();
+  (void)inShell;
+  s_waiting = !poller_idle();
   if (s_waiting) {
     lv_obj_t* w = mklabel(p, tr(T::WAITING_NET), theme_font(FONT_13), C_DIM);
     lv_obj_align(w, LV_ALIGN_CENTER, 0, 0);
@@ -151,6 +154,13 @@ void screen_wifi_tick() {
   if (s_waiting && poller_idle()) {
     s_waiting = false;
     shell_show(ContentId::WIFI);
+  }
+}
+
+void screen_wifi_full_tick() {
+  if (s_waiting && poller_idle()) {
+    s_waiting = false;
+    request_state(ST_WIFI);              // monta de novo, agora com a lista
   }
 }
 

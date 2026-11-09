@@ -113,6 +113,10 @@ void render_state() {
         s_pendingContent = ContentId::HOME;   // a próxima sessão abre em /agora
     }
     if (prev == ST_TOKEN && s_state != ST_TOKEN) web_token_reset();
+    // ST_WIFI mexe no rádio pelo loop(): nenhum job novo enquanto ele está
+    // aberto (a tela ainda espera o que já está em voo, poller_idle).
+    if (s_state == ST_WIFI) scheduler_pause();
+    else if (prev == ST_WIFI) scheduler_resume();
     full_clean();
     if (s_state == ST_TOKEN) web_token_begin();
     const ScreenOps& o = s_screens[s_state];

@@ -258,6 +258,9 @@ void factory_reset() {
     LittleFS.remove(pth);
   }
   memset(&g_accts, 0, sizeof(g_accts));
+  // Sem jobs novos e sem o ciclo aberto. O que já está na net_task termina e
+  // é descartado (gen++ abaixo, seq do token, cycle cancelado); a tela de
+  // WiFi que vem depois espera o poller_idle() antes de mexer no rádio.
   scheduler_stop();
   stop_web();
   web_token_reset();
@@ -592,7 +595,7 @@ static void register_ui() {
   app_register_screen(ST_SPLASH,    {screen_splash_build, nullptr});
   app_register_screen(ST_PIN,       {pin_screen_build, pin_screen_tick});
   app_register_screen(ST_SETUP_PIN, {pin_screen_build, nullptr});
-  app_register_screen(ST_WIFI,      {screen_wifi_full, nullptr});
+  app_register_screen(ST_WIFI,      {screen_wifi_full, screen_wifi_full_tick});
   app_register_screen(ST_TOKEN,     {screen_token_full, nullptr});
 
   app_register_content(ContentId::HOME,         {home_build, home_refresh, screen_home_tick});
