@@ -2327,11 +2327,25 @@ static bool wait_for_time(uint32_t timeoutMs) {
   return ok;
 }
 
+// Consulta de uso com PROBE_MODEL, com o log da v2.3. Sai na fase 2 (item 24),
+// quando as consultas passam para a net_task.
+static bool fetch_usage_v23(const char *tok, UsageData &out) {
+  int http; uint16_t ms;
+  bool ok = fetchUsage(tok, PROBE_MODEL, out, &http, &ms);
+  Serial.printf("[API] HTTP %d (%ums) %s\n", http, (unsigned)ms, ok ? "ok" : out.error);
+  return ok;
+}
+
 // Sonda o próximo modelo da rotação.
 static void probe_next_model() {
   int mi = g_probeIdx % NMODELS;
   g_probeIdx++;
-  probeModel(g_token, g_models[mi].id, g_models[mi].pr);
+  UsageData tmp = {};
+  int http; uint16_t ms;
+  fetchUsage(g_token, g_models[mi].id, tmp, &http, &ms);
+  g_models[mi].pr.code = http;
+  g_models[mi].pr.ms = ms;
+  Serial.printf("[PROBE] %s -> HTTP %d (%ums)\n", g_models[mi].id, http, (unsigned)ms);
   g_models[mi].atMs = millis();
 }
 
@@ -2340,7 +2354,7 @@ static void do_refresh() {
   wait_for_time(10000);
   int slot = g_accts.active;
   AccountState &a = acct[slot];
-  bool ok = fetchUsage(g_token, a.usage);
+  bool ok = fetch_usage_v23(g_token, a.usage);
   if (ok) {
     fetchModelStatus(g_status); g_lastOkMs = millis(); g_lastFetchOk = true;
     uint32_t now = (uint32_t)time(nullptr);
@@ -2363,7 +2377,7 @@ static void bg_refresh() {
   ensure_time();
   g_refreshing = true; set_hdr_status(); lv_refr_now(NULL);
   UsageData u = {};
-  bool ok = fetchUsage(g_token, u);
+  bool ok = fetch_usage_v23(g_token, u);
   bool rebuild = false;
   if (ok) {
     int slot = g_accts.active;

@@ -22,12 +22,36 @@ struct UsageData {
     char     error[64];          // mensagem de erro se ok=false
 };
 
-bool fetchUsage(const char* token, UsageData& out);
+// Configura CA e timeouts de uma requisição HTTPS. Chamar DEPOIS de
+// https.begin(client, url). Usado por fetchUsage e fetchModelStatus.
+//   - handshake TLS: NET_HANDSHAKE_S (segundos; padrão do core seria 120 s)
+//   - conexão TCP:   NET_CONNECT_MS (o HTTPClient repassa a cada connect e
+//                    sobrescreve o do client, por isso não se usa
+//                    client.setConnectionTimeout)
+//   - leitura:       API_TIMEOUT_MS (espera máxima por dados, não o total)
+// WiFiClientSecure é typedef de NetworkClientSecure (core 3.x).
+class NetworkClientSecure;
+class HTTPClient;
+void net_client_setup(NetworkClientSecure& client, HTTPClient& https);
 
-// Sonda leve de UM modelo (POST max_tokens:1): mede latência e código HTTP.
-// 200 = disponível · 429 = limitado p/ este plano/janela · 5xx = falha na API.
+// Maior token aceito (o Authorization vai num char[220] de stack).
+#define API_TOKEN_MAX 199
+
+// POST /v1/messages (max_tokens:1) com `modelId`. Lê os headers unified-*.
+// Devolve true se a resposta trouxe headers unified-* (hasUnifiedHeaders);
+// nesse caso `out` é preenchido, inclusive em 401/403/429. Não classifica:
+// a classe sai de classify_usage(http, hasHeaders).
+//   *httpOut: sempre definido. Código HTTP, ou negativo em erro de transporte
+//             (HTTPC_ERROR_*; falha no begin ou token inválido = -1). Nunca 0.
+//   *msOut:   latência da requisição em ms (teto 65000).
+// out.ok = hasUnifiedHeaders; out.error recebe "http_<n>"/"no_usage_h_<n>" sem
+// headers. Não loga (o log com [slot N] fica com quem chama).
+bool fetchUsage(const char* token, const char* modelId, UsageData& out,
+                int* httpOut, uint16_t* msOut);
+
+// Resultado da sonda de UM modelo (o USAGE da conta em foco usa o modelo do
+// rodízio). 200 = disponível · 429 = limitado · 5xx = falha na API.
 struct ProbeResult {
     int      code;   // código HTTP (0 = nunca sondado, <0 = erro de rede)
     uint16_t ms;     // latência da requisição
 };
-bool probeModel(const char* token, const char* modelId, ProbeResult& out);

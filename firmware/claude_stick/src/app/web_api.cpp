@@ -9,6 +9,7 @@
 #include <ESPmDNS.h>
 #include <time.h>
 #include "hw/wifi_manager.h"
+#include "config.h"
 #include "net/api.h"
 #include "model/accounts.h"
 #include "model/account_state.h"
@@ -113,7 +114,8 @@ static void handleTokenPost() {
   token_msg(TRS("validando token...", "validating token..."));
 
   UsageData tmp = {};
-  bool ok = fetchUsage(t.c_str(), tmp);
+  int http; uint16_t ms;
+  bool ok = fetchUsage(t.c_str(), PROBE_MODEL, tmp, &http, &ms);
   if (ok) {
     strlcpy(g_pendingToken, t.c_str(), sizeof(g_pendingToken));
     g_validatedUsage = tmp;                     // .ino copia p/ acct[slot] ao salvar

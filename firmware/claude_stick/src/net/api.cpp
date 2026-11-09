@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <mbedtls/platform_util.h>
 
 #define H5U "anthropic-ratelimit-unified-5h-utilization"
 #define H5R "anthropic-ratelimit-unified-5h-reset"
@@ -23,98 +24,84 @@ static const char* RL_HEADERS[] = {
 };
 static const int RL_HEADER_COUNT = 12;
 
-bool fetchUsage(const char* token, UsageData& out) {
-    WiFiClientSecure client;
+void net_client_setup(NetworkClientSecure& client, HTTPClient& https) {
     client.setCACert(CA_BUNDLE);
+    client.setHandshakeTimeout(NET_HANDSHAKE_S);   // segundos (NetworkClientSecure.cpp:450-451)
+    https.setConnectTimeout(NET_CONNECT_MS);       // repassado a cada connect (HTTPClient.cpp:1109)
+    https.setTimeout(API_TIMEOUT_MS);              // espera máxima por dados (HTTPClient.cpp:1287)
+}
 
+static uint16_t clamp_ms(uint32_t dt) { return dt > 65000 ? 65000 : (uint16_t)dt; }
+
+bool fetchUsage(const char* token, const char* modelId, UsageData& out,
+                int* httpOut, uint16_t* msOut) {
+    *httpOut = -1;
+    *msOut = 0;
+    out.ok = false;
+    if (!token || !modelId || strlen(token) > API_TOKEN_MAX || strlen(modelId) > 64) {
+        strlcpy(out.error, "bad_args", sizeof(out.error));
+        return false;
+    }
+
+    WiFiClientSecure client;
     HTTPClient https;
     if (!https.begin(client, MESSAGES_ENDPOINT)) {
         strlcpy(out.error, "https_init", sizeof(out.error));
-        out.ok = false;
         return false;
     }
+    net_client_setup(client, https);
 
-    https.addHeader("Authorization", String("Bearer ") + token);
+    // Authorization num buffer de stack, zerado no fim. O addHeader copia o
+    // valor para um String no heap que o HTTPClient libera sem zerar (risco
+    // residual declarado no design, Technical Plan §1).
+    char auth[220];
+    snprintf(auth, sizeof(auth), "Bearer %s", token);
+    https.addHeader("Authorization", auth);
     https.addHeader("anthropic-version", ANTHROPIC_VERSION);
     https.addHeader("anthropic-beta", "oauth-2025-04-20");
     https.addHeader("content-type", "application/json");
     https.addHeader("User-Agent", "claude-code/2.1.5");
-    https.setTimeout(API_TIMEOUT_MS);
     https.collectHeaders(RL_HEADERS, RL_HEADER_COUNT);
 
-    String body = "{\"model\":\"" PROBE_MODEL "\","
-                  "\"max_tokens\":1,"
-                  "\"messages\":[{\"role\":\"user\",\"content\":\".\"}]}";
-
-    Serial.printf("[API] POST %s\n", MESSAGES_ENDPOINT);
-    int code = https.POST(body);
-    Serial.printf("[API] HTTP %d\n", code);
-
-    if (code <= 0) {
-        snprintf(out.error, sizeof(out.error), "http_%d", code);
-        out.ok = false;
-        https.end();
-        return false;
-    }
-
-    String h5u = https.header(H5U);
-    String d7u = https.header(D7U);
-
-    if (h5u.length() == 0 && d7u.length() == 0) {
-        if (code == 401) strlcpy(out.error, "auth_failed", sizeof(out.error));
-        else snprintf(out.error, sizeof(out.error), "no_usage_h_%d", code);
-        out.ok = false;
-        https.end();
-        return false;
-    }
-
-    out.h5 = h5u.toFloat() * 100.0f;
-    out.d7 = d7u.toFloat() * 100.0f;
-    out.h5ResetEpoch = (uint32_t)https.header(H5R).toInt();
-    out.d7ResetEpoch = (uint32_t)https.header(D7R).toInt();
-    out.unifiedResetEpoch = (uint32_t)https.header(URS).toInt();
-    out.fallbackPct = https.header(UFB).toFloat() * 100.0f;
-
-    strlcpy(out.statusOverall, https.header(UST).c_str(), sizeof(out.statusOverall));
-    strlcpy(out.status5h,      https.header(H5S).c_str(), sizeof(out.status5h));
-    strlcpy(out.status7d,      https.header(D7S).c_str(), sizeof(out.status7d));
-    strlcpy(out.repClaim,      https.header(URC).c_str(), sizeof(out.repClaim));
-    strlcpy(out.overageStatus, https.header(UOS).c_str(), sizeof(out.overageStatus));
-    strlcpy(out.overageReason, https.header(UOR).c_str(), sizeof(out.overageReason));
-
-    Serial.printf("[API] 5h:%.0f%% (%s)  7d:%.0f%% (%s)  claim:%s  overall:%s\n",
-                  out.h5, out.status5h, out.d7, out.status7d, out.repClaim, out.statusOverall);
-
-    https.end();
-    out.ok = true;
-    return true;
-}
-
-bool probeModel(const char* token, const char* modelId, ProbeResult& out) {
-    WiFiClientSecure client;
-    client.setCACert(CA_BUNDLE);
-
-    HTTPClient https;
-    if (!https.begin(client, MESSAGES_ENDPOINT)) { out.code = -1; out.ms = 0; return false; }
-
-    https.addHeader("Authorization", String("Bearer ") + token);
-    https.addHeader("anthropic-version", ANTHROPIC_VERSION);
-    https.addHeader("anthropic-beta", "oauth-2025-04-20");
-    https.addHeader("content-type", "application/json");
-    https.addHeader("User-Agent", "claude-code/2.1.5");
-    https.setTimeout(API_TIMEOUT_MS);
-
-    String body = String("{\"model\":\"") + modelId + "\","
-                  "\"max_tokens\":1,"
-                  "\"messages\":[{\"role\":\"user\",\"content\":\".\"}]}";
+    char body[160];
+    snprintf(body, sizeof(body),
+             "{\"model\":\"%s\",\"max_tokens\":1,"
+             "\"messages\":[{\"role\":\"user\",\"content\":\".\"}]}", modelId);
 
     uint32_t t0 = millis();
-    int code = https.POST(body);
-    uint32_t dt = millis() - t0;
-    https.end();
+    int code = https.POST((uint8_t*)body, strlen(body));
+    *msOut = clamp_ms(millis() - t0);
+    *httpOut = (code == 0) ? -1 : code;   // 0 quer dizer "nunca sondado" em /modelos
 
-    out.code = code;
-    out.ms = (dt > 65000) ? 65000 : (uint16_t)dt;
-    Serial.printf("[PROBE] %s -> HTTP %d (%ums)\n", modelId, code, (unsigned)dt);
-    return code == 200;
+    bool has = false;
+    if (code > 0) {
+        String h5u = https.header(H5U);
+        String d7u = https.header(D7U);
+        has = h5u.length() > 0 || d7u.length() > 0;
+        if (has) {
+            out.h5 = h5u.toFloat() * 100.0f;
+            out.d7 = d7u.toFloat() * 100.0f;
+            out.h5ResetEpoch = (uint32_t)https.header(H5R).toInt();
+            out.d7ResetEpoch = (uint32_t)https.header(D7R).toInt();
+            out.unifiedResetEpoch = (uint32_t)https.header(URS).toInt();
+            out.fallbackPct = https.header(UFB).toFloat() * 100.0f;
+
+            strlcpy(out.statusOverall, https.header(UST).c_str(), sizeof(out.statusOverall));
+            strlcpy(out.status5h,      https.header(H5S).c_str(), sizeof(out.status5h));
+            strlcpy(out.status7d,      https.header(D7S).c_str(), sizeof(out.status7d));
+            strlcpy(out.repClaim,      https.header(URC).c_str(), sizeof(out.repClaim));
+            strlcpy(out.overageStatus, https.header(UOS).c_str(), sizeof(out.overageStatus));
+            strlcpy(out.overageReason, https.header(UOR).c_str(), sizeof(out.overageReason));
+            out.error[0] = 0;
+        } else {
+            snprintf(out.error, sizeof(out.error), "no_usage_h_%d", code);
+        }
+    } else {
+        snprintf(out.error, sizeof(out.error), "http_%d", *httpOut);
+    }
+
+    https.end();
+    mbedtls_platform_zeroize(auth, sizeof(auth));   // memset seria otimizado fora
+    out.ok = has;
+    return has;
 }
