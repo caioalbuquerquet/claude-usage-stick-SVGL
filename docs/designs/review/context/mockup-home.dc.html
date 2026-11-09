@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Tela inicial · Hermes × THEP</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#2fb5dd}a:hover{color:#6cb2ec}
+.pulse{animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 7px rgba(0,0,0,0)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0)}}
+</style>
+</helmet>
+<div style="width: 480px; height: 320px; position: relative; box-sizing: border-box; background: #0c1222; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; display: flex; flex-direction: column; overflow: hidden">
+
+  <div style="height: 50px; flex-shrink: 0; box-sizing: border-box; padding: 6px 8px 4px 10px; display: flex; align-items: center; gap: 10px">
+    <img src="/_blob/a2d6ee23c8685a84f643a427dc980813" alt="THEP" style="height: 38px; width: 104.5px">
+    <div style="flex-grow: 1"></div>
+    <span class="pulse" role="img" aria-label="{{dotLabel}}" style="width: 10px; height: 10px; border-radius: 50%; color: {{dotColor}}; background: {{dotColor}}"></span>
+    <button aria-label="Menu" aria-expanded="{{menuOpen}}" onClick="{{toggleMenu}}" style="height: 38px; min-width: 84px; padding: 0 12px; border: 1px solid #1272c2; border-radius: 6px; background: {{menuBg}}; color: #2fb5dd; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px">
+      <span style="color: #8a98a8">❯</span>
+      <span>menu</span>
+    </button>
+  </div>
+
+  <div style="flex-grow: 1; position: relative; margin: 6px 8px 6px; border: 1px solid #1272c2; border-radius: 8px; padding: 14px 12px 8px; box-sizing: border-box">
+    <span style="position: absolute; top: -8px; right: 14px; background: #0c1222; padding: 0 6px; font-size: 11px; line-height: 14px; font-weight: 700; color: #2fb5dd">{{panelTitle}}</span>
+
+    <sc-if value="{{is1}}" hint-placeholder-val="{{false}}">
+      <div style="height: 100%; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px">
+          <img src="/_blob/6437754618a75e430ce6f9ebff6cf7f9" alt="" style="width: 124px; height: 124px">
+          <span style="font-size: 12px; font-weight: 700; color: #2f8fd6; margin-top: 6px">{{a1.label}}</span>
+          <span style="font-size: 11px"><span style="color: #8a98a8">status: </span><span style="color: #8ed57f">ok</span></span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+          <span style="font-size: 12px; font-weight: 700; color: #2f8fd6">Janela 5h</span>
+          <span style="font-size: 50px; line-height: 52px; font-weight: 800; color: {{a1.c5}}">{{a1.p5}}%</span>
+          <span style="font-size: 12px; line-height: 15px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a1.c5}}">{{a1.b5l.on}}</span><span style="color: #34457a">{{a1.b5l.off}}</span><span style="color: #8a98a8">]</span></span>
+          <span style="font-size: 11.5px"><span style="color: #8a98a8">reset: </span>{{a1.r5}}</span>
+          <span style="font-size: 12px; font-weight: 700; color: #2f8fd6; margin-top: 10px">Semana</span>
+          <div style="display: flex; align-items: baseline; gap: 8px">
+            <span style="font-size: 20px; font-weight: 800; color: {{a1.c7}}">{{a1.p7}}%</span>
+            <span style="font-size: 11px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a1.c7}}">{{a1.b7l.on}}</span><span style="color: #34457a">{{a1.b7l.off}}</span><span style="color: #8a98a8">]</span></span>
+          </div>
+          <span style="font-size: 11.5px"><span style="color: #8a98a8">reset: </span>{{a1.r7}}</span>
+          <span style="font-size: 11.5px; color: {{a1.pc}}; margin-top: 8px">{{a1.proj}}</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{is2}}" hint-placeholder-val="{{true}}">
+      <div style="height: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px">
+        <sc-for list="{{two}}" as="a" hint-placeholder-count="2">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <div style="display: flex; align-items: baseline; justify-content: space-between">
+              <span style="font-size: 12.5px; font-weight: 700; color: #2f8fd6">{{a.label}}</span>
+              <span style="font-size: 10.5px; color: #8ed57f">ok</span>
+            </div>
+            <span style="font-size: 10.5px; color: #8a98a8; margin-top: 2px">5h</span>
+            <span style="font-size: 38px; line-height: 40px; font-weight: 800; color: {{a.c5}}">{{a.p5}}%</span>
+            <span style="font-size: 12px; line-height: 15px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a.c5}}">{{a.b5m.on}}</span><span style="color: #34457a">{{a.b5m.off}}</span><span style="color: #8a98a8">]</span></span>
+            <span style="font-size: 11px"><span style="color: #8a98a8">reset: </span>{{a.r5}}</span>
+            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-top: 8px">
+              <span style="font-size: 11px"><span style="color: #8a98a8">semana: </span><span style="font-size: 13px; font-weight: 800; color: {{a.c7}}">{{a.p7}}%</span></span>
+              <span style="font-size: 11px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a.c7}}">{{a.b7s.on}}</span><span style="color: #34457a">{{a.b7s.off}}</span><span style="color: #8a98a8">]</span></span>
+            </div>
+            <span style="font-size: 11px"><span style="color: #8a98a8">reset: </span>{{a.r7}}</span>
+            <span style="font-size: 11px; color: {{a.pc}}; margin-top: 6px">{{a.proj}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{is3}}" hint-placeholder-val="{{false}}">
+      <div style="height: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+        <sc-for list="{{three}}" as="a" hint-placeholder-count="3">
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+            <div style="display: flex; align-items: baseline; justify-content: space-between">
+              <span style="font-size: 11.5px; font-weight: 700; color: #2f8fd6">{{a.label}}</span>
+              <span style="font-size: 10px; color: #8ed57f">ok</span>
+            </div>
+            <span style="font-size: 10px; color: #8a98a8; margin-top: 2px">5h</span>
+            <span style="font-size: 30px; line-height: 32px; font-weight: 800; color: {{a.c5}}">{{a.p5}}%</span>
+            <span style="font-size: 11px; line-height: 14px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a.c5}}">{{a.b5s.on}}</span><span style="color: #34457a">{{a.b5s.off}}</span><span style="color: #8a98a8">]</span></span>
+            <span style="font-size: 10.5px; white-space: nowrap">{{a.r5}}</span>
+            <span style="font-size: 10.5px; margin-top: 8px"><span style="color: #8a98a8">semana </span><span style="font-size: 12px; font-weight: 800; color: {{a.c7}}">{{a.p7}}%</span></span>
+            <span style="font-size: 10.5px; white-space: nowrap"><span style="color: #8a98a8">reset </span>{{a.r7}}</span>
+            <span style="font-size: 10.5px; color: {{a.pc}}; margin-top: 6px; white-space: nowrap">{{a.proj}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{is4}}" hint-placeholder-val="{{false}}">
+      <div style="height: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); column-gap: 18px; row-gap: 8px">
+        <sc-for list="{{four}}" as="a" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+            <div style="display: flex; align-items: baseline; justify-content: space-between">
+              <span style="font-size: 12px; font-weight: 700; color: #2f8fd6">{{a.label}}</span>
+              <span style="font-size: 11px"><span style="color: #8a98a8">5h </span><span style="font-size: 20px; font-weight: 800; color: {{a.c5}}">{{a.p5}}%</span></span>
+            </div>
+            <span style="font-size: 11px; line-height: 14px; white-space: nowrap"><span style="color: #8a98a8">[</span><span style="color: {{a.c5}}">{{a.b5m.on}}</span><span style="color: #34457a">{{a.b5m.off}}</span><span style="color: #8a98a8">]</span></span>
+            <div style="display: flex; justify-content: space-between; font-size: 10.5px">
+              <span><span style="color: #8a98a8">sem </span><span style="font-weight: 800; color: {{a.c7}}">{{a.p7}}%</span></span>
+              <span><span style="color: #8a98a8">reset </span>{{a.r5short}}</span>
+            </div>
+            <span style="font-size: 10.5px; color: {{a.pc}}">{{a.proj}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+
+  <div style="height: 20px; flex-shrink: 0; background: #070b18; display: flex; align-items: center; padding: 0 10px; font-size: 10.5px; color: #cbd5e1; white-space: nowrap">
+    <img src="/_blob/ad08992ef1cdcd7942449cf7926058b8" alt="" style="width: 13px; height: 13px; margin-right: 5px">
+    <span style="font-weight: 700; color: #2fb5dd">thep</span>
+    <span style="color: #34457a; margin: 0 8px">│</span>
+    <span>{{n}}/4 contas</span>
+    <span style="color: #34457a; margin: 0 8px">│</span>
+    <span><span style="color: #8a98a8">↻ </span>2min</span>
+    <span style="color: #34457a; margin: 0 8px">│</span>
+    <span><span style="color: #8a98a8">⏲ </span>14:32</span>
+  </div>
+
+  <sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+    <div style="position: absolute; top: 50px; right: 8px; width: 262px; box-sizing: border-box; background: #141e33; border: 1px solid #1272c2; border-radius: 6px; padding: 4px; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(7, 11, 24, 0.7)">
+      <sc-for list="{{pages}}" as="p" hint-placeholder-count="6">
+        <button style="height: 42px; border: 0; border-radius: 4px; background: {{p.bg}}; display: flex; align-items: center; gap: 8px; padding: 0 10px; font-family: 'JetBrains Mono', monospace; text-align: left">
+          <span style="width: 10px; font-size: 12px; color: #2fb5dd">{{p.mark}}</span>
+          <span style="width: 86px; font-size: 13px; font-weight: 700; color: {{p.cmdColor}}">{{p.cmd}}</span>
+          <span style="font-size: 11px; color: #8a98a8">{{p.desc}}</span>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"contas":{"editor":"enum","options":["1","2","3","4"],"default":"2"},"menu":{"editor":"boolean","default":false},"status":{"editor":"enum","options":["ok","recente","parcial","falha"],"default":"ok"},"$preview":{"width":480,"height":320}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = {open: null}; }
+  renderVals() {
+    const n = Math.min(4, Math.max(1, Number(this.props.contas ?? 2) || 2));
+    const st = this.props.status ?? 'ok';
+    const open = this.state.open === null ? !!this.props.menu : this.state.open;
+    const DOT = {ok: ['#5caf4e', 'Tudo ok'], recente: ['#2f8fd6', 'Contas atualizadas há menos de 10 s'], parcial: ['#f0c419', 'Uma conta com erro na última consulta'], falha: ['#f05252', 'Todas as contas com erro na última consulta']};
+    const lvl = (p) => p < 50 ? '#5caf4e' : p < 80 ? '#f0a32a' : '#f05252';
+    const bar = (p, k) => { const on = Math.round(p / 100 * k); return {on: '█'.repeat(on), off: '░'.repeat(k - on)}; };
+    const RAW = [
+      ['Conta 1', 62, 38, '1h12m · 16:40', '16:40', 'qui 09:00', true, '~78%', ''],
+      ['Conta 2', 87, 71, '2h41m · 18:09', '18:09', 'sáb 14:00', false, '', '15:20 · 38m'],
+      ['Conta 3', 24, 55, '3h05m · 19:33', '19:33', 'dom 11:00', true, '~41%', ''],
+      ['Conta 4', 45, 92, '0h50m · 16:18', '16:18', 'ter 08:00', true, '~52%', '']
+    ];
+    const accts = RAW.map(([label, p5, p7, r5, r5short, r7, ok, end, runout]) => ({
+      label, p5, p7, r5, r5short, r7,
+      c5: lvl(p5), c7: lvl(p7),
+      pc: ok ? '#8ed57f' : '#ff8a8a',
+      proj: ok ? '✓ não esgota · ' + end : '✗ esgota ' + runout,
+      b5l: bar(p5, 18), b5m: bar(p5, 14), b5s: bar(p5, 9), b7l: bar(p7, 10), b7s: bar(p7, 8)
+    }));
+    const PAGES = [['/agora', 'uso das contas'], ['/modelos', 'status por modelo'], ['/janela', 'gráfico 5h'], ['/ritmo', 'uso por hora'], ['/contas', 'gerenciar contas'], ['/ajustes', 'configurações']];
+    return {
+      n, is1: n === 1, is2: n === 2, is3: n === 3, is4: n === 4,
+      a1: accts[0], two: accts.slice(0, 2), three: accts.slice(0, 3), four: accts,
+      panelTitle: 'THEP Usage v3.0 · ' + n + (n === 1 ? ' conta' : ' contas'),
+      dotColor: DOT[st][0], dotLabel: DOT[st][1],
+      menuOpen: open, menuBg: open ? '#1a2740' : 'transparent',
+      toggleMenu: () => this.setState({open: !open}),
+      pages: PAGES.map(([cmd, desc], i) => ({cmd, desc, mark: i === 0 ? '❯' : '', bg: i === 0 ? '#1a2740' : 'transparent', cmdColor: i === 0 ? '#2fb5dd' : '#e2e8f0'}))
+    };
+  }
+}
+</script>
+</body>
+</html>

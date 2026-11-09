@@ -7,7 +7,7 @@
 // ============================================================
 
 // ── Firmware ─────────────────────────────────────────────
-#define FW_VERSION              "2.3"
+#define FW_VERSION              "3.0"
 
 // ── Display QSPI (AXS15231B) ─────────────────────────────
 #define TFT_CS    45
@@ -35,7 +35,7 @@
 #define DEFAULT_POLL_SEC        120
 #define MIN_POLL_SEC            30
 #define MAX_POLL_SEC            300
-#define STATUS_POLL_SEC         300      // status.claude.com a cada 5 min
+#define STATUS_POLL_SEC         300      // status.claude.com a cada 5 min (job STATUS do agendador)
 
 // ── Segurança (PIN + AES-256-GCM) ────────────────────────
 #define PIN_LEN                 4
@@ -45,7 +45,10 @@
 
 // ── Rede / API Claude ────────────────────────────────────
 #define WIFI_CONNECT_TIMEOUT_MS 8000
-#define API_TIMEOUT_MS          15000
+#define WIFI_JOIN_TIMEOUT_MS    15000   // rede nova da tela de WiFi (job WIFI_JOIN)
+#define API_TIMEOUT_MS          8000     // leitura: espera máxima por dados (HTTPClient::setTimeout)
+#define NET_CONNECT_MS          5000     // conexão TCP (HTTPClient::setConnectTimeout)
+#define NET_HANDSHAKE_S         5        // handshake TLS, em SEGUNDOS (NetworkClientSecure::setHandshakeTimeout)
 #define MESSAGES_ENDPOINT       "https://api.anthropic.com/v1/messages"
 #define ANTHROPIC_VERSION       "2023-06-01"
 #define PROBE_MODEL             "claude-haiku-4-5-20251001"
@@ -55,6 +58,57 @@
 // NTP (necessário para os contadores de reset)
 #define NTP_SERVER_1            "pool.ntp.org"
 #define NTP_SERVER_2            "time.cloudflare.com"
+
+// ── Task de rede (net_task) ──────────────────────────────
+#define NET_TASK_STACK          14336    // bytes
+#define NET_TASK_CORE           0        // loop() roda no core 1
+// Requisição HTTPS sem terminar por mais que isto => lastReset="net_stuck" e
+// esp_restart(). Pior caso com timeouts respeitados ~39 s (DNS ~21 + 5 + 5 + 8).
+#define NET_REQ_STUCK_MS        90000
+
+// ── Agendador / modelo ──────────────────────────────────
+#define HIST_SAVE_MIN_SEC       300      // intervalo mínimo entre gravações do histórico
+#define DOT_FRESH_SEC           10       // ponto azul por até N s após o fim do ciclo
+#define AUTH_BACKOFF_MAX_SEC    1800     // teto da espera crescente após AUTH (30 min)
+#define NTP_GRACE_SEC           60       // sem relógio por mais que isto => NOCLOCK
+
+// ── Display / shell (fase 3, item 34) ───────────────────
+// Pulso do ponto de status: 4 degraus de opacidade (100/70/40/70%), um a cada
+// DOT_PULSE_STEP_MS (ciclo de 1,6 s). Fallback do spike se o quadro passar de
+// 40 ms e o modo parcial não resolver: 1000 (1 troca por segundo).
+// Spike medido na placa (2026-11-09): FULL deu frame_max=109 ms / flush_max=65 ms
+// com degraus de 400 ms; o PARTIAL de então (faixa exata de linhas nativas,
+// CASET 0..319 + RASET) desenhou deslocado na horizontal: na paisagem isso é
+// linha nativa errada, ou seja, o AXS15231B em QSPI não respeita a janela de
+// LINHAS (RASET).
+// Resultado final na placa (2026-11-09): DISP_BANDS=1 + DISP_ROT_FAST=1 desenha
+// limpo e deu frame_max=44-46 ms (pior quadro, com rows_max=459 da troca do
+// relógio do rodapé), rot_max<1 ms, send_max=37 ms. Um degrau do pulso só envia
+// ~112 linhas, então o pulso volta ao ciclo de 1,6 s aprovado.
+#define DOT_PULSE_STEP_MS       400
+// Pipeline do display (spike, item 34). Padrão: DISP_BANDS=1 + DISP_ROT_FAST=1 (faixas de linhas nativas a partir da linha 0 e rotação em blocos).
+// Para testar sem editar o arquivo:
+//   THEP_FLAGS="-DDISP_ROT_FAST=1" ./build.sh upload-dev
+//   THEP_FLAGS="-DDISP_BANDS=1 -DDISP_ROT_FAST=1" ./build.sh upload-dev
+// DISP_ROT_FAST: 1 = rotação de 270° em blocos 16x16 (src/logic/rot270),
+//   mesma imagem, menos tempo no flush.
+// DISP_BANDS: 0 = FULL (480x320 inteiro a cada quadro); 1 = PARTIAL e envio
+//   das linhas nativas 0..r1 (o prefixo que cobre o que mudou, ver o
+//   disp_flush_cb no .ino); 2 = experimento com a faixa exata via RASET,
+//   espera-se o mesmo deslocamento do PARTIAL antigo.
+// Rotação pelo painel (MADCTL MV, "DISP_ROT_HW") não existe de propósito: o
+// AXS15231B em QSPI só espelha (MX/MY); troca de eixos (MV) não funciona
+// nele (relatos ESPHome/LVGL/esp-iot-solution), e o bring-up chegou à
+// rotação por software pelo mesmo motivo.
+#ifdef DISP_PARTIAL
+#error "DISP_PARTIAL saiu: use DISP_BANDS=1 (ou DISP_BANDS=2 para repetir o envio com RASET)"
+#endif
+#ifndef DISP_ROT_FAST
+#define DISP_ROT_FAST           1
+#endif
+#ifndef DISP_BANDS
+#define DISP_BANDS              1
+#endif
 
 // ── NVS ──────────────────────────────────────────────────
 #define NVS_NAMESPACE           "claude"

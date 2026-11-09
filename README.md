@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/brand/claudecode-color.svg" width="76" alt="Clawd">
+<img src="assets/brand/thep-bird.png" width="76" alt="THEP">
 
 # Claude Usage Stick
 
@@ -9,25 +9,29 @@ No computer. No app. No cloud.
 
 **English** · [Português](README.pt-BR.md)
 
-<img src="https://img.shields.io/badge/firmware-v2.3-D97757?style=for-the-badge" alt="firmware v2.3">
+<img src="https://img.shields.io/badge/firmware-v3.0-1272C2?style=for-the-badge" alt="firmware v3.0">
 <img src="https://img.shields.io/badge/ESP32--S3-AXS15231B%20480×320-1A1A20?style=for-the-badge" alt="ESP32-S3 AXS15231B">
 <img src="https://img.shields.io/badge/LVGL-9.2.2-4ADE80?style=for-the-badge" alt="LVGL 9.2.2">
 <img src="https://img.shields.io/badge/accounts-up%20to%204-8C8C98?style=for-the-badge" alt="up to 4 accounts">
 
-<img src="assets/mock-agora.png" width="560" alt="Claude Usage Stick — Now screen (mockup)">
+<img src="assets/mock-home-2.png" width="560" alt="Claude Usage Stick — home screen with two accounts (mockup)">
 
 </div>
 
 The device queries Anthropic's API directly, reads your usage straight from the response headers,
-and renders it on a dashboard — a burn-rate projection, an animated **Clawd**, an hour-of-day
-heatmap, reset clocks, and **up to 4 accounts** you can switch between on-screen.
+and renders it on a dashboard: **every saved account side by side** (up to 4), a burn-rate
+projection, reset clocks, an hour-of-day chart and a status dot that tells you at a glance whether
+any account stopped updating.
 
-> 100% touch navigation (swipe ← → between screens, no physical button). Adapted from the original
-> **Claude Usage Stick** project (a multi-board firmware with physical buttons) to run **on this
-> screen only** — see [What came from the original project](#what-came-from-the-original-project).
+> 100% touch navigation through a **menu** in the header (no swipe, no physical button). v3 drops
+> the coral-and-Clawd look for a terminal-style UI in the spirit of the
+> [Hermes Agent](https://github.com/NousResearch/hermes-agent) CLI, in the colors of
+> **THEP**. Adapted from the original **Claude Usage Stick** project (a multi-board firmware with
+> physical buttons) to run **on this screen only** — see
+> [What came from the original project](#what-came-from-the-original-project).
 
-> The on-screen UI is in Portuguese (the author's language). This README documents it in English;
-> screenshot labels are referenced where useful.
+> The on-screen UI is in Portuguese by default (English is one tap away in Settings). This README
+> documents it in English; on-screen labels are quoted where useful.
 
 ---
 
@@ -62,154 +66,225 @@ If you're comfortable with a terminal, skip it and use [Build & flash](#build--f
 
 ## Screens
 
-> The images below are **pixel-accurate mockups** rendered from the firmware's own layout and
-> palette (real device photos coming soon) — regenerate with `python3 tools/gen_mockups.py`. They
-> match v2.3, except that the four swipe screens do not yet show the `@label` account badge that
-> appears in the header once you add a second account.
+> The images below are **mockups** rendered by `python3 tools/gen_mockups.py` with the firmware's
+> own fonts (JetBrains Mono, from `tools/gen_fonts.sh`), images (`tools/gen_hermes_assets.py`) and
+> geometry; the script also fails if any text would overflow its card. Real device photos coming
+> soon.
 
-Navigate by **swiping** (the dots at the bottom show your position; the active one becomes a
-pill). The **gear** opens Settings. The thin **coral bar** below the header counts down to the
-next refresh — tapping it refreshes immediately.
+After the PIN, the screen is a fixed **shell**:
 
-### 1. Now (*Agora*)
-<img src="assets/mock-agora.png" width="400" align="right" alt="Now screen">
+- **Header:** the THEP logo, the [status dot](#status-dot) and the `❯ menu` button.
+- **Panel:** a bordered box whose title sits on the border (`THEP Usage v3.0 · 2 contas` on the home
+  screen, the focused account's label on the per-account screens).
+- **Footer:** saved accounts (with `· N ✗` when N of them are failing), the refresh interval and
+  the clock.
 
-- Two big cards: **5-hour window** and **week (7-day) window**.
-- Each card: large percentage and an **18-segment meter** whose lit segments (and the number)
-  slide continuously from **green through amber to red** as the window fills, plus a **large live
-  countdown** to the reset and the **local reset time**.
-- Two-line bottom strip: on top, when the [token bridge](#tokens-per-session-optional-bridge) is
-  running, the **real token counts** for the current 5 h window; below it, the overall **status
-  chip** (`OK` / `ATENCAO` / `BLOQUEADO`) next to the **5 h projection verdict** — the same math as
-  [screen 3](#3-5-hour-window-janela-de-5h), condensed: *"NAO esgota antes do reset (62%)"* in
-  green, *"Esgota as 16:40 (em 1h32m)"* in amber/red.
+Polling and the local web server keep running whatever screen is open.
+
+### Menu
+<img src="assets/mock-menu.png" width="400" align="right" alt="Menu">
+
+`❯ menu` opens a list over the current screen; tap an item or anywhere outside to close it:
+
+| Item | Opens |
+|---|---|
+| `↻ Atualizar agora` | refresh now (no effect while a cycle is already running) |
+| `/agora` | home: account usage |
+| `/modelos` | per-model status |
+| `/janela` | 5-hour window chart |
+| `/ritmo` | usage by hour |
+| `/contas` | manage accounts |
+| `/ajustes` | settings (About lives here) |
+
+The commands are not translated. There is no automatic return to the home screen.
 
 <br clear="right">
 
-### 2. Models (*Modelos*)
+### Home (`/agora`)
+
+One card per **saved** account, in slot order. The layout depends on how many accounts are saved
+(1 to 4). A failing account keeps its column, so the layout never jumps around because of a network
+blip.
+
+<img src="assets/mock-home-1.png" width="400" alt="Home, 1 account"> <img src="assets/mock-home-2.png" width="400" alt="Home, 2 accounts">
+<img src="assets/mock-home-3.png" width="400" alt="Home, 3 accounts"> <img src="assets/mock-home-4.png" width="400" alt="Home, 4 accounts">
+
+| Accounts | Layout | Per account |
+|---|---|---|
+| 1 | THEP bird in braille + sections | label and API mark under the bird; 5 h % in 50 px, 18-block bar, reset (`1h12m · 16:40`), week % with a 10-block bar, week reset (`qui 09:00`), projection, and the [token count](#tokens-per-session-optional-bridge) when the bridge is running |
+| 2 | 2 columns | label + API mark; 5 h % in 38 px, 14-block bar, reset, week % + 8-block bar, week reset, projection (secondary text in 13 px, rows spread over the card height) |
+| 3 | 3 columns | label (up to 10 characters) + API mark; 5 h % in 30 px, 9-block bar, reset, week %, week reset, projection |
+| 4 | 2×2 grid | label + 5 h % (20 px) on one line, 14-block bar, week % + 5 h reset clock, projection; no room for the API mark, so `atenção`/`limite` turn the 5 h % amber/red instead |
+
+- **Levels** are fixed steps, for both windows: green below 50 %, amber from 50 % to under 80 %,
+  red from 80 %.
+- **API mark** comes from `anthropic-ratelimit-unified-status`: `allowed` → `ok` (green),
+  `allowed_warning` or anything containing `warning` → `atenção` (amber), `rejected` /
+  `rate_limited` / `exceeded` → `limite` (red); any other value is shown as-is, cut to 8
+  characters.
+- **Projection** is one line, computed by the same function as [`/janela`](#5-hour-window-janela):
+  `✓ não esgota · ~78%` (won't run out; 78 % expected at the reset), `✗ esgota 15:20 · 38m` (runs
+  out at 15:20, in 38 min), `✗ esgotada` (exhausted), `— sem histórico` (not enough samples yet).
+  When the 5 h reset time has already passed but the next reading hasn't arrived, the card says
+  `— janela reiniciou` and the reset line shows `passou · 16:40` instead of a frozen countdown.
+- **Labels** longer than the card allows are cut with `…`.
+- **Tap a card** to make that account the **focus** (used by `/modelos`, `/janela` and `/ritmo`).
+
+#### When an account is failing
+
+The card never turns into an error screen. In order of precedence:
+
+1. Slot that could not be decrypted with this PIN: `SEM CHAVE`.
+2. Failing, with no data yet (e.g. the first query after a token change came back 401): `⚠ AUTH`
+   instead of the projection and `--%` instead of the 5 h %.
+3. Failing, with older data: the last values stay on screen, dimmed, and the projection line
+   becomes `⚠ <class> · <data age>`, e.g. `⚠ AUTH · 4m`.
+4. Not queried yet (just unlocked, or new token): `consultando…` with `--%`.
+
+| Class | Meaning |
+|---|---|
+| `AUTH` | 401 / 403 (the account is retried with backoff: it skips 1, 2, 4… cycles, up to 30 min, until the token is replaced) |
+| `RATE` | 429 without usage headers |
+| `ERR` | any other 4xx, 3xx, or 200 without usage headers |
+| `SRV` | 5xx |
+| `NET` | timeout, DNS, TLS, no HTTP code |
+| `NOWIFI` | WiFi is down (the device keeps trying the saved networks) |
+| `NOCLOCK` | no NTP time for more than 60 s after WiFi came up (TLS can't work without a clock) |
+
+A 429 **with** usage headers is valid data (the account is at its limit), not a failure.
+
+#### Status dot
+
+The dot in the header sums up **every** account and pulses in 4 steps of opacity (1.6 s cycle):
+
+| Color | When |
+|---|---|
+| Red `#f05252` | every account that has an answer is failing (includes no WiFi) |
+| Yellow `#f0c419` | at least one account is failing |
+| Blue `#2f8fd6` | first cycle after unlocking still running, or the last cycle ended less than 10 s ago with every account OK |
+| Green `#5caf4e` | everything else |
+
+An account that hasn't answered yet doesn't count as failing, so right after unlocking the dot is
+never red.
+
+### Models (`/modelos`)
 <img src="assets/mock-modelos.png" width="400" align="right" alt="Models screen">
 
-- The 4 Clawd mascots (Haiku / Sonnet / Opus / Fable) with a **live status pill** under each one,
-  fed by a **real probe against the API** (one model per refresh cycle, rotating):
-  `OK 0.9s` (green, with latency) · `LIMITADO` (amber, HTTP 429) · `ERRO` (red, 5xx/network) ·
-  `N/D` / `--` (gray). The mascot goes gray when the model is unreachable or under incident.
-- The old incident line moved out of here: it became the [home-screen dialog](#incident-alert).
+- A text list, one line per model (Haiku / Sonnet / Opus / Fable), colored by result:
+  `ok · 0.9s` (green, with latency) · `limitado` (amber, HTTP 429) · `AUTH` (401/403) · `NET`
+  (network error) · `erro <code>` (any other code) · `n/d` (HTTP 404, gray) · `—` (not probed yet).
+- The probe is **the focused account's own usage query**: each cycle it uses the next model in the
+  rotation instead of the fixed one. If that model answers without usage headers, the account is
+  re-queried right away with the fixed model, so a model being down never marks the account as
+  failing.
+- The last line is `status.claude.com`: `sem incidentes`, or the incident's severity and the models
+  it names.
+- The panel title is the focused account's label; tap it to move to the next account.
 
 <br clear="right">
 
-### 3. 5-hour window (*Janela de 5h*)
+### 5-hour window (`/janela`)
 <img src="assets/mock-janela5h.png" width="400" align="right" alt="5-hour window screen">
 
-- Custom chart with the **X axis spanning exactly the current 5 h window** (start → reset).
-- Solid coral line = real usage history; **dotted line = projection** at the current burn rate.
-- Plain-language verdict, color-coded: *"At the current rate, runs out at 16:40 (in 1h32m)"*
-  (amber/red) or *"Does NOT run out before the reset (~62%)"* (green). A short form of that same
-  verdict also sits in the [screen 1](#1-now-agora) footer, so you don't have to swipe to know
-  whether you're going to hit the ceiling.
+- Chart of the focused account with the **X axis spanning exactly the current 5 h window**
+  (start → reset).
+- Solid line = real usage history; **dashed line = projection** at the current burn rate.
+- The caption is the same projection text as the home cards, with room for the full sentence.
+- The [token count](#tokens-per-session-optional-bridge) shows here too when the bridge is running.
 
 <br clear="right">
 
-### 4. Hourly rhythm (*Ritmo por hora*)
+### Hourly rhythm (`/ritmo`)
 <img src="assets/mock-ritmo.png" width="400" align="right" alt="Hourly rhythm screen">
 
-- **Usage by hour of day**: 24 bars whose height/brightness show which hours burn the most quota;
-  the current hour is highlighted.
-- **Period selector** at the top: **Hoje / 7d / 30d / Tudo** (today, last 7 days, last 30 days,
-  all time). Per-day history is **persisted to flash** (31 days on the device).
+- **Usage by hour of day** for the focused account: 24 bars showing which hours burn the most
+  quota; the current hour is highlighted.
+- **Period selector**: **hoje / 7d / 30d / tudo** (today, last 7 days, last 30 days, all time).
+  Per-day history is **persisted to flash** (31 days per account).
 
 <br clear="right">
 
 ### Incident alert
-<img src="assets/mock-incidente.png" width="400" align="right" alt="Incident dialog">
+<img src="assets/mock-incidente.png" width="400" align="right" alt="Incident alert">
 
-When `status.claude.com` reports an **unresolved incident** on any model, a modal dialog takes over
-the home screen: *"⚠ INCIDENTE ATIVO ⚠ — veja status.claude.com"*. It answers the question that
-matters the moment something stalls: **is it you or is it Anthropic?**
+When `status.claude.com` reports an **unresolved incident** on any model, an alert opens over
+whatever screen is showing: *"⚠ INCIDENTE ATIVO"*, with the THEP bird grayed out and *"veja
+status.claude.com"*. It answers the question that matters the moment something stalls: **is it you
+or is it Anthropic?**
 
 The **severity** Statuspage reports in the incident's `impact` field becomes a **chip** below the
 title, and tints the border and title:
 
 | `impact` | chip | color |
 |---|---|---|
-| `minor` | `LEVE` | amber `#FBBF24` |
-| `major` | `GRAVE` | orange `#FB923C` |
-| `critical` | `CRITICO` | red `#F87171` |
-| `none` / missing | `IMPACTO NAO DECLARADO` | amber `#FBBF24` |
+| `minor` | `LEVE` | amber `#f0a32a` |
+| `major` | `GRAVE` | light red `#ff8a8a` |
+| `critical` | `CRÍTICO` | red `#f05252` |
+| `none` / missing | `IMPACTO NÃO DECLARADO` | amber `#f0a32a` |
 
-**Every incident naming a model opens the dialog** — none is silently suppressed. When there's no
-usable severity (the field came back `none`, or the parser didn't find it), the chip says so
-outright instead of disappearing and leaving the modal looking generic.
+**Every incident naming a model opens the alert** — none is silently suppressed. When there's no
+usable severity, the chip says so outright instead of disappearing.
 
-Below the chip come the **models named** by the incident, from the same keyword scan that decides
-whether the dialog shows at all — with the **version**, when the incident text says which
-(`Opus 4.6 • Sonnet 4.5`). With all four families affected the line collapses to **`All`**; with
-three, versions are dropped, otherwise the line overflows the 262 px column.
-
-With no model named the model line disappears — better to omit than to invent. Whatever remains
-moves up, no gap left.
+Below the chip come the **models named** by the incident, with the **version** when the incident
+text says which (`Opus 4.6 • Sonnet 4.5`). With all four families affected the line collapses to
+`Todos`. With no model named the line disappears — better to omit than to invent.
 
 Tap anywhere (or `OK`) to dismiss. It **won't nag you again** for the duration of that incident —
-it only comes back if the incident is resolved and a new one shows up, **or if the severity
-escalates** (a `minor` turning `critical` re-alerts even after being dismissed). If severity changes
-while the dialog is open, it redraws in the new color. The slideshow stays paused while it's open.
+it only comes back if the incident is resolved and a new one shows up, **or if the severity escalates** (a
+`minor` turning `critical` re-alerts even after being dismissed). If severity changes while the
+alert is open, it redraws in the new color.
 
 <br clear="right">
 
-### Threshold moments (animations)
+### Threshold moments
 <img src="assets/mock-momento.png" width="400" align="right" alt="Threshold moment overlay">
 
-Whenever a window crosses **25 % / 50 % / 70 % / 100 %**, a full-screen animated "moment" pops
-up (8 combinations: 4 thresholds × 2 windows): the official pixel-art **Clawd** drops in and
-reacts to the level — relaxed at 25 %, focused with a sweat drop at 50 %, wide-eyed and shaking
-at 70 %, grayed-out with X eyes and a blinking red ring at 100 % — while the percentage counts
-up and a segment meter lights up. Tap to dismiss (auto-closes after ~4.5 s).
+Whenever an account's 5 h window or week crosses **25 % / 50 % / 70 % / 100 %**, a full-screen
+"moment" pops up with the THEP bird, the account's label, the percentage counting up and a block
+bar lighting up. The bird bounces at 25 % and 50 %, shakes at 70 % and goes gray at 100 %. Tap to
+dismiss (auto-closes after 4.6 s).
 
-> **Double-tap the Clawd icon or the CLAUDE CODE wordmark** to preview the 8 animations in sequence. The **refresh button** sits at the center of the header (the thin coral bar below it is just the countdown indicator).
+Thresholds are tracked **per account**. If several accounts cross something in the same cycle, only
+the highest one is shown; the others are marked as fired and don't repeat.
 
-The header and the token/loading screens use the **official Claude Code pixel logo** (SVGs in
-`assets/brand/`, converted to embedded LVGL images by `tools/gen_logo_assets.py`).
+Stacking order, bottom to top: menu, threshold moment, incident alert.
 
 <br clear="right">
 
-### Settings (*Ajustes*)
+### Settings (`/ajustes`)
 
-Opened from the gear (scrollable list, 44 px touch rows):
+A scrollable list, in this order:
 
-- **Refresh now** — forces a refresh.
-- **Refresh interval** — 30 s / 1 min / 2 min / 5 min (tap to cycle; saved to NVS).
-- **Slideshow** — auto-advances the screens; tap to cycle **off / 5 s / 10 s / 15 s / 30 s**
-  (pauses for 10 s after any touch).
-- **Timezone: GMT±N** — adjusts the timezone (tap to cycle; fixes the reset clocks).
-- **Brightness** — low / medium / high (backlight PWM).
-- **Configure WiFi** — re-scan + password on screen.
-- **Accounts** — up to 4 Claude accounts (e.g. personal + work); tap a slot to switch which one
-  the device monitors, add via the web form (with a custom label), rename on-screen (pencil),
-  remove with 2 taps.
-- **Change token** — reopens the web token entry (replaces the active account's token).
-- **Language** — Portuguese / English, applied to the whole UI (saved to NVS).
-- **About** — device info, display model and developer credits.
-- **Erase everything** — factory reset (2 taps to confirm).
+- **Atualizar agora** (Refresh now).
+- **Atualizar a cada** (Refresh every) — 30 s / 1 min / 2 min / 5 min, tap to cycle (default
+  2 min; saved to NVS).
+- **Idioma** (Language) — Português / English, applied to the whole UI.
+- **Fuso** (Timezone) — tap to cycle through GMT−3, −4, −5, −6, −7, −8, −2, −1, 0, +1, +2, +3
+  (default GMT−3). Nothing beyond GMT+3 or below GMT−8.
+- **Brilho** (Brightness) — low / medium / high.
+- **Configurar WiFi** — re-scan + password on screen. While this screen owns the radio, polling
+  pauses (it shows *"aguardando a rede…"* until the query in flight finishes) and resumes when you
+  leave.
+- **Contas** (Accounts) — `N/4`, opens [`/contas`](#accounts-contas).
+- **Trocar token** (Change token) — reopens the web token entry for the **focused** account.
+- **Sobre** (About) — device info, firmware version, display model and credits.
+- **Apagar tudo** (Erase everything) — factory reset (2 taps to confirm).
 
-### Accounts (*Contas*)
-<img src="assets/mock-contas.png" width="400" align="right" alt="Accounts screen">
+The v2.3 slideshow is gone; its NVS key is left in place (and ignored) so a rollback finds it.
+
+### Accounts (`/contas`)
 
 Got a personal **and** a work Claude subscription? The device holds **up to 4**, each with its own
 label and its own encrypted slot, all behind the same PIN.
 
-- **Tap a row to switch.** The active one is coral and marked *ativa*. Switching swaps the token
-  and that account's history/heatmap, then refreshes immediately — no PIN prompt, the session
-  already unlocked it.
-- **Only the active account is polled.** The others are completely dormant: **zero API requests**.
-  That matters for a corporate account, where every poll is visible to your org's admins.
+- **Tap a row to focus it.** The focused account is highlighted and marked `•  foco`. Focus only
+  decides which account `/modelos`, `/janela` and `/ritmo` show (and which one carries the model
+  probe); **every account is polled regardless**.
 - **Pencil renames** on-screen; duplicate names get a " 2" suffix automatically, because the
   [token bridge](#tokens-per-session-optional-bridge) identifies accounts by label.
-- **Trash removes** (2 taps to confirm), and it will not let you delete the last one.
-- **+ Add account** reuses the web form, which now takes a label along with the token.
-
-When more than one account exists, the dashboard header shows an `@label` badge so you always know
-which one you are looking at.
-
-<br clear="right">
+- **Trash removes** (2 taps to confirm), and it will not let you delete the last one. A result
+  still in flight for a removed account is discarded.
+- **+ Adicionar conta** reuses the web form, which takes a label along with the token.
 
 ---
 
@@ -232,6 +307,10 @@ Pins and the validated display/color/touch configuration are in
 [`firmware/REFERENCIA-HARDWARE-LVGL.md`](firmware/REFERENCIA-HARDWARE-LVGL.md) and the reference
 bring-up sketch in [`firmware/bringup/`](firmware/bringup/).
 
+The firmware sources and `firmware/REFERENCIA-HARDWARE-LVGL.md` call the board **Guition
+JC4832W535**; sellers and the case below use **JC3248W535C**. Both names refer to this same 3.5"
+ESP32-S3 + AXS15231B board (contributors have run the firmware on boards sold as JC3248W535C).
+
 ### 3D-printable case
 
 A ready-to-print case for this display board is included:
@@ -244,72 +323,120 @@ and the Usage Stick is desk-ready.
 
 The gadget makes a **minimal** `POST` (`max_tokens: 1`) to
 `https://api.anthropic.com/v1/messages` and **doesn't use the response body** — it reads usage
-straight from the headers:
+straight from the headers (`src/net/api.cpp`):
 
 ```
-anthropic-ratelimit-unified-status                allowed | allowed_warning | rejected
+anthropic-ratelimit-unified-status                allowed | allowed_warning | rejected  (the API mark)
 anthropic-ratelimit-unified-5h-utilization        0–1   (becomes the 5-hour window %)
 anthropic-ratelimit-unified-5h-reset              epoch
+anthropic-ratelimit-unified-5h-status
 anthropic-ratelimit-unified-7d-utilization        0–1   (7-day window)
 anthropic-ratelimit-unified-7d-reset              epoch
+anthropic-ratelimit-unified-7d-status
+anthropic-ratelimit-unified-reset                 epoch
 anthropic-ratelimit-unified-representative-claim  five_hour | seven_day  (what limits you first)
 anthropic-ratelimit-unified-fallback-percentage
 anthropic-ratelimit-unified-overage-status / -overage-disabled-reason
 ```
 
-Model health comes from `status.claude.com/api/v2/incidents/unresolved.json`: unresolved incidents
-name the model family in their own text, so a keyword scan is all the parsing needed
-(`status.cpp`), which also picks the highest `impact` (`minor` / `major` / `critical`) in the list. That's what fires the [incident dialog](#incident-alert) on the home screen.
+**Every saved account is queried once per cycle**, one request at a time, on a dedicated network
+task, so the screen keeps responding to touch while requests are in flight. A new cycle starts one
+interval **after the previous one ends** (no overlap). Each request has a 5 s connect, 5 s TLS
+handshake and 8 s read timeout; if a request is still running after 90 s, the device writes the
+reason to NVS and restarts (you'll be asked for the PIN again).
 
-The **per-model probe** stays: each refresh cycle the device sends one `max_tokens: 1` POST to the
-next model in the rotation (Haiku → Sonnet → Opus → Fable) and records the HTTP code + latency.
-That's what feeds the pills on the Models screen.
+The **per-model probe** rides on the focused account's query (see [`/modelos`](#models-modelos)),
+so it costs no extra request in the normal case.
+
+Model health comes from `status.claude.com/api/v2/incidents/unresolved.json`, fetched **every
+5 minutes** (`STATUS_POLL_SEC`), once for all accounts. Unresolved incidents name the model family
+in their own text, so a keyword scan is all the parsing needed (`src/net/status.cpp`), which also
+picks the highest `impact` in the list. That's what fires the [incident alert](#incident-alert).
+
+### What polling every account costs
+
+Every poll is a real (minimal) API request, **visible to your org's admins** like any Claude Code
+usage. With every account polled, the count is *accounts × cycles per hour*:
+
+| Interval | 1 account | 2 accounts | 4 accounts |
+|---|---|---|---|
+| 30 s | 120 /h | 240 /h | 480 /h |
+| 1 min | 60 /h | 120 /h | 240 /h |
+| 2 min (default) | 30 /h | 60 /h | 120 /h |
+| 5 min | 12 /h | 24 /h | 48 /h |
+
+Add the occasional retry when the rotating probe model answers without usage headers. Each request
+is `max_tokens: 1` with a few input tokens, so quota consumption is negligible — but on a corporate
+account the **volume** is what admins see. v2.3 polled only the active account; if that matters to
+you, pick a longer interval or keep fewer accounts on the device. An account rejected with 401/403
+backs off on its own (up to 30 min between tries).
 
 ### Tokens per session (optional bridge)
 
 The API does **not** expose token counts for subscription accounts — the `unified-*` headers only
 carry utilization percentages, and `/api/oauth/usage` requires the `user:profile` scope (the
 `setup-token` only has `user:inference`) and still returns percentages. The real numbers live in
-the **local Claude Code transcripts** (`~/.claude/projects/**/*.jsonl`).
+the **local Claude Code transcripts** (`<config dir>/projects/**/*.jsonl`, `~/.claude` by default).
 
 [`tools/token_bridge.py`](tools/token_bridge.py) (stdlib only) closes that gap: it asks the device
-for the current window (`GET http://claude-stick.local/window`), sums the transcript `usage`
-entries since the window start (deduped by message id) and pushes them back
-(`POST /tokens`). The "Now" screen then shows *"tokens na janela: 1.2M entrada • 88k saida"*.
+for the account's current window (`GET http://claude-stick.local/window?account=<label>`), sums the
+transcript `usage` entries since the window start (deduped by message id, searching every
+subfolder of `projects/`) and pushes them back (`POST /tokens`). The single-account home screen and
+`/janela` then show *"tokens: 1.2M entrada · 88k saída"*. The count disappears when it goes stale
+(more than 15 min without a push).
+
+The payload carries `in` (input + cache-creation tokens), `out`, `cache` (cache reads) and
+`sessions`; the device stores all four and shows `in`/`out`.
 
 ```bash
-python3 tools/token_bridge.py               # one shot
-python3 tools/token_bridge.py --loop 120    # keep pushing every 2 min
+python3 tools/token_bridge.py                              # one shot, focused account
+python3 tools/token_bridge.py --loop 120                   # keep pushing every 2 min
+python3 tools/token_bridge.py --host 192.168.0.42          # if mDNS doesn't resolve
 ```
 
-The device advertises itself via mDNS as **`claude-stick.local`** while the dashboard is open. If
-the row disappears, the data just went stale (> 15 min without a push).
+The device advertises itself via mDNS as **`claude-stick.local`** once it is on WiFi.
 
-With multiple accounts, run one bridge per machine with `--account <label>` (the label configured
-on the gadget). `GET /window` reports which account is active; a push for another account gets a
-`409` and is simply skipped until that account becomes active again.
+**Device contract (v3):**
+
+- `GET /window` returns the focused account's window; `GET /window?account=<label>` returns that
+  account's, or **404** if no account has that label.
+- `POST /tokens` with `"account": "<label>"` goes to the account with exactly that label
+  (case-sensitive); without `account` it goes to the focused account. An unknown label gets
+  **404**. The v2.3 `409 account_mismatch` no longer exists.
+
+#### Several accounts on the same computer
+
+Each account needs its own transcripts, so run Claude Code for each one with its own
+`CLAUDE_CONFIG_DIR`, and give each one its own bridge with `--config-dir` (reads
+`<dir>/projects` instead of `~/.claude/projects`) and `--account` (the label set on the gadget):
 
 ```bash
-python3 tools/token_bridge.py --account Trabalho --loop 120   # work laptop
-python3 tools/token_bridge.py --account Pessoal --loop 120    # personal machine
+# ~/.zshrc — one Claude Code config dir per account
+alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work claude'
+alias claude-personal='CLAUDE_CONFIG_DIR=~/.claude-personal claude'
 ```
 
-### Multiple accounts
+```bash
+python3 tools/token_bridge.py --config-dir ~/.claude-work     --account Trabalho --loop 120
+python3 tools/token_bridge.py --config-dir ~/.claude-personal --account Pessoal  --loop 120
+```
 
-The device stores up to **4 accounts** (label + token), each encrypted in its own NVS slot with
-the same PIN. Only the **active** account is polled — the others stay dormant, generating **zero
-API traffic**. Switching (Settings → Accounts) takes two taps: the device decrypts the slot,
-swaps the per-account history/heatmap (`/hist0.bin`..`/hist3.bin` in LittleFS) and refreshes
-immediately. The dashboard header shows an `@label` badge whenever more than one account exists.
+This changes how you start Claude Code day to day (log in once inside each alias). On separate
+machines, `--account` alone is enough. If a label doesn't exist on the gadget, the bridge says so
+and skips the push. An old bridge (without `?account=`) keeps working, but only for the focused
+account. The new bridge also works against a v2.3 device: it checks which account v2.3 reports as
+active and skips the push for any other.
 
-Heads-up for corporate accounts: every poll is a real (minimal) API request, visible to your org's
-admins like any Claude Code usage.
+### Upgrading from v2.3 (and from v2.1)
 
-**Upgrading a device that already runs v2.1?** Nothing is lost and nothing is asked of you. The
-first boot moves the single stored token into slot 0 (labelled "Conta 1") and gives it a copy of
-the existing history. Both originals are deliberately **kept**, so flashing v2.1 again finds them
-where it left them — the migration only ever adds. Flashing does not touch the `nvs` or `spiffs`
-partitions in the first place; only the app partition is rewritten.
+Flashing v3 over v2.3 keeps the accounts, the PIN and the history: the partition table, the
+`/hist0.bin`..`/hist3.bin` format and the NVS keys are unchanged, and only the app partition is
+rewritten. The v2.3 "active account" becomes the v3 focused account.
+
+**Coming from v2.1?** Nothing is lost and nothing is asked of you. The first boot moves the single
+stored token into slot 0 (labelled "Conta 1") and gives it a copy of the existing history. Both
+originals are deliberately **kept**, so flashing v2.1 again finds them where it left them — the
+migration only ever adds.
 
 ### Generating the token (`claude setup-token`)
 
@@ -381,22 +508,40 @@ Sources, gathered 13 Aug 2026:
 
 Prerequisites (tested versions):
 
-- `arduino-cli` 1.4.x · core `esp32:esp32` **3.3.11**
+- `arduino-cli` 1.4.x · core `esp32:esp32` **3.3.8** (the version v3 was validated on)
 - libraries: **GFX Library for Arduino** 1.6.5 · **lvgl** 9.2.2
 
 ```bash
 cd firmware/claude_stick
-./build.sh                 # compile
-./build.sh upload          # compile + flash (default port /dev/cu.usbmodem101)
+./build.sh                          # compile (output in build/, fails if the app passes 2.8 MB)
+./build.sh upload                   # compile + flash (default port /dev/cu.usbmodem101)
 ./build.sh upload /dev/cu.usbmodemXXXX
+./build.sh dev                      # compile with -DTHEP_DEV (diagnostic routes and logs)
+./build.sh upload-dev [port]        # same, and flash
 ./build.sh monitor /dev/cu.usbmodemXXXX
+THEP_FLAGS="-D..." ./build.sh ...   # extra compiler flags for experiments
+```
+
+From the repository root, `./flash.sh` finds the board's port on its own and runs
+`build.sh upload`.
+
+The `THEP_DEV` build adds `GET /health` (heap, PSRAM, LVGL memory, network-task stack, cycle and
+frame times, per-slot class — never tokens or labels) and more serial logs. The release build
+prints the cycle log (`[CYC]`, `[HEAP]`) either way.
+
+Host tests (pure logic in `src/logic/`, plus a check that network code never calls LVGL):
+
+```bash
+firmware/tests/run.sh               # g++ with C++17
 ```
 
 FQBN: `esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=custom,CDCOnBoot=cdc,USBMode=hwcdc,FlashMode=qio`
 
-`build.sh` passes `-DLV_CONF_INCLUDE_SIMPLE -I<sketch>` so LVGL finds the sketch's `lv_conf.h`. If
-you get `lv_conf.h not found`, copy `firmware/claude_stick/lv_conf.h` into your Arduino libraries
-folder (one level above the `lvgl` folder) — copy **this** file, not an older one: the
+`build.sh` passes `-DLV_CONF_INCLUDE_SIMPLE -I<sketch> -I<sketch>/src` (in the C, C++ **and**
+assembler flags) so LVGL finds the sketch's `lv_conf.h` and the modules include each other by their
+path under `src/`. If you get `lv_conf.h not found`, copy `firmware/claude_stick/lv_conf.h` into
+your Arduino libraries folder (one level above the `lvgl` folder) — copy **this** file, not an
+older one: the
 `#include <stdint.h>` in it is wrapped in an `#ifndef __ASSEMBLY__` guard, without which the build
 dies while assembling lvgl's `lv_blend_helium.S` / `lv_blend_neon.S`:
 
@@ -420,6 +565,29 @@ To build the bring-up sketch, use its own script — `firmware/bringup/build.sh`
 
 > If colors come out with red/blue swapped, flip `LV_COLOR_16_SWAP` to `1` in `lv_conf.h`.
 
+The fonts, the THEP images and the README mockups are generated files; the generators and their
+dependencies are described in [`firmware/README.md`](firmware/README.md).
+
+### Rollback to v2.3
+
+v3 changes neither the partition table nor the data formats, so going back is **flashing only the
+app partition** of v2.3. Never use `erase_flash` (or any "erase all" option): that wipes the
+accounts, the PIN and the history.
+
+```bash
+# option 1: rebuild v2.3 from the tag (uses v2.3's own build.sh)
+git checkout v2.3
+firmware/claude_stick/build.sh upload /dev/cu.usbmodemXXXX
+git checkout -        # back to where you were
+
+# option 2: flash a saved v2.3 app binary straight into app0
+esptool --chip esp32s3 -p /dev/cu.usbmodemXXXX write-flash 0x10000 claude_stick.ino.bin
+```
+
+(`esptool` ships with the core, under `~/Library/Arduino15/packages/esp32/tools/esptool_py/` on
+macOS.) v2.3 opens with the PIN, the v3 focused account becomes the active one and the history is
+still there. v2.3 polls only that account again.
+
 ---
 
 ## First-time setup (onboarding)
@@ -428,29 +596,42 @@ Everything via the screen / network — no recompiling needed:
 
 1. **WiFi** — tap your network and type the password (on-screen keyboard). Stores up to 3 networks
    in NVS.
-2. **Token** — the screen shows the **gadget's IP** (e.g. `http://192.168.0.42`) with an animated
-   Claude icon. Open that address **on your PC/phone on the same network**, optionally give the
-   account a **label** (e.g. *Pessoal*, *Trabalho*) and **paste the token** into the form. The
-   device **validates** the token on the spot (a real API call) before accepting it.
+2. **Token** — the screen shows the **gadget's IP** (e.g. `http://192.168.0.42`). Open that
+   address **on your PC/phone on the same network**, optionally give the account a **label** (e.g.
+   *Pessoal*, *Trabalho*) and **paste the token** into the form. The device **validates** the token
+   with a real API call (the page shows *"validando…"* and waits for the answer) before accepting
+   it.
 3. **PIN** — set a 4-digit PIN (entered twice to confirm). The token is encrypted with it.
 
-On every subsequent boot, the device only asks for the **PIN** to decrypt the token. Extra
-accounts added later (Settings → Accounts) reuse the same form and are encrypted with the same
-PIN — no PIN prompt again during the session.
+On every subsequent boot, the device only asks for the **PIN**, decrypts every account and opens
+the home screen with all cards in `consultando…`. Extra accounts added later (`/contas`) reuse the
+same form and are encrypted with the same session key — no PIN prompt again during the session.
 
 ---
 
 ## Security
 
-- Tokens are stored **encrypted** (AES-256-GCM; key derived from the PIN via SHA-256), one NVS
-  slot per account, all under the **same PIN**. The PIN is **never** stored — a wrong PIN means
-  the GCM tag fails to verify.
-- After 10 wrong attempts, the credentials are **wiped** and the device returns to onboarding
-  (each failure doubles the lockout time).
-- The history/heatmap lives in a **LittleFS** file, one per account (it does not contain the token).
-- The PIN stays in RAM for the session so switching accounts does not prompt again. This does not
-  weaken the model: the active token is already held decrypted in RAM either way. Nothing is
-  written to NVS, and a factory reset clears it.
+- Tokens are stored **encrypted** (AES-256-GCM), one NVS slot per account, all under the **same
+  PIN**. The key is derived from the PIN with **10,000 rounds of SHA-256**, salted with the chip's
+  **MAC address**, which ties the encrypted blob to this board. The PIN is **never** stored — a
+  wrong PIN means the GCM tag fails to verify.
+- Wrong PINs lock the keypad for 60 s, doubling with each failure up to **1 hour**. After 10 wrong
+  attempts the credentials are **wiped** (before any token is decrypted) and the device returns to
+  onboarding.
+- If a slot doesn't decrypt but others do, that card shows `SEM CHAVE` and the rest work; if none
+  decrypts, it counts as a wrong PIN.
+- **Up to 4 tokens are held decrypted in RAM** during the session, because every account is polled.
+  They live in one table behind a mutex; the network task copies a token into a stack buffer only
+  for the request and zeroes it afterwards, as it does the `Authorization` header buffer. A residual
+  copy stays in the HTTP client's heap string until the request ends. Removing an account, changing
+  its token or erasing everything zeroes the token(s).
+- The PIN itself is not kept: the derived key stays in RAM for the session, so accounts added later
+  can be encrypted without asking again. Anyone who can read the RAM already has the decrypted
+  tokens either way.
+- Logs say `[slot N]` and never print a token; `/window` and `/health` never return one.
+- The bridge endpoints have no authentication (as in v2.3): someone on the same network could fake
+  the **token count** shown for an account, but not the usage %, which comes from the API.
+- The history/heatmap lives in **LittleFS**, one file per account (it does not contain the token).
 - `.env` and `.mcp.json` are in `.gitignore` — **no secrets go to git**.
 
 ---
@@ -463,21 +644,23 @@ This is a fork of the **Claude Usage Stick** (a multi-board firmware with physic
 **Reused from the original (adapted):**
 
 - The core idea of **reading usage from the** `anthropic-ratelimit-unified-*` **headers** with a
-  minimal `POST` (`firmware/claude_stick/api.cpp`).
-- The **model-health** fetch from `status.claude.com` (`status.cpp`).
-- The **token encryption** AES-256-GCM + PIN-derived key (`crypto.cpp`).
-- The **CA bundle** for HTTPS (`certs.cpp`).
-- The product concept and the **Clawd mascots** / model-status row.
+  minimal `POST` (`src/net/api.cpp`).
+- The **model-health** fetch from `status.claude.com` (`src/net/status.cpp`).
+- The **token encryption** AES-256-GCM + PIN-derived key (`src/sec/crypto.cpp`).
+- The **CA bundle** for HTTPS (`src/net/certs.cpp`).
+- The product concept and the model-status row (the Clawd mascots lived here until v2.3).
 
 **Rewritten / new in this version:**
 
-- **LVGL 9 UI** for the touch screen (tileview with swipe + dots, cards, mascots with arms/legs,
-  chart, heatmap) — replacing the multi-board TFT_eSPI/U8g2.
+- **LVGL 9 UI** for the touch screen — a fixed shell with a menu, per-account cards, chart and
+  hourly bars — replacing the multi-board TFT_eSPI/U8g2.
+- **All accounts polled** on a dedicated FreeRTOS network task, with the UI thread never doing
+  HTTPS.
 - **arduino-cli build** for the ESP32-S3 (replacing the multi-board PlatformIO setup).
 - **Touch navigation** instead of physical buttons.
 - **On-screen onboarding + web token entry** (local IP) instead of a captive portal.
 - **Full** header parsing (status, `representative-claim`, overage, fallback).
-- **Background refresh**, **persisted history/heatmap** (LittleFS), **configurable timezone**.
+- **Persisted per-account history/heatmap** (LittleFS), **configurable timezone**.
 
 ---
 
@@ -486,36 +669,52 @@ This is a fork of the **Claude Usage Stick** (a multi-board firmware with physic
 ```
 firmware/
   claude_stick/                 # the firmware (arduino-cli sketch)
-    claude_stick.ino            # setup/loop, state machine, dashboard, screens
-    api.cpp/.h                  # fetchUsage() — usage via API headers
-    status.cpp/.h               # fetchModelStatus() — status.claude.com incidents
-    crypto.cpp/.h               # AES-256-GCM + PIN-derived key
-    accounts.cpp/.h             # account slots in NVS (multi-account)
-    certs.cpp/.h                # CA bundle for HTTPS
-    wifi_manager.h              # networks saved in NVS (up to 3)
-    touch.h                     # AXS15231B driver
+    claude_stick.ino            # setup/loop, display/touch, PIN and session
+    src/
+      app/                      # app state and navigation, local web server (token form, /window, /tokens)
+      hw/                       # touch driver, WiFi manager, LVGL pool in PSRAM, frame timing
+      logic/                    # pure functions, host-tested (projection, status dot, classes, levels…)
+      model/                    # per-account state, account slots in NVS, history in LittleFS
+      net/                      # network task, scheduler, API and status.claude.com clients, token table, CA bundle
+      sec/                      # AES-256-GCM + PIN-derived key
+      ui/                       # shell, menu, screens, overlays, theme, generated fonts and images
     config.h                    # pins + endpoints + constants
     lv_conf.h                   # LVGL 9.2 config
-    partitions.csv              # 16 MB partition (app + nvs + LittleFS)
-    build.sh                    # compile / flash / monitor
+    partitions.csv              # 16 MB: nvs, otadata, app0 + app1 (3 MB each), spiffs (LittleFS), coredump
+    build.sh                    # compile / flash / dev build / monitor
+  tests/                        # host tests for src/logic (run.sh)
   bringup/                      # validated bring-up (hardware reference)
+    bringup.ino, config.h, touch.h
     build.sh                    # its own FQBN — see Build & flash
+  README.md                     # firmware modules, concurrency rule, generators
   REFERENCIA-HARDWARE-LVGL.md   # display/colors/touch that work
 tools/
   token_bridge.py               # pushes local token counts to the device
-  gen_logo_assets.py            # brand SVGs -> logo_assets.h
+  test_token_bridge.py          # bridge tests (python3 tools/test_token_bridge.py)
+  gen_fonts.sh                  # JetBrains Mono -> src/ui/fonts/*.c
+  gen_hermes_assets.py          # THEP logo + braille bird -> src/ui/assets_thep.{h,c}
   gen_mockups.py                # regenerates assets/mock-*.png (the screens)
   gen_banners.py                # regenerates assets/banner-*.png (README banners)
 assets/                         # screen mockups, README banners + brand assets (brand/)
 3D Case/                        # printable case (STL) for the board
+flash.sh                        # finds the port, then build.sh upload
 ```
+
+The two 3 MB app slots come from the partition table, but there is no OTA: the firmware always runs
+from `app0`, and `app1` is unused. The table is kept as is on purpose, because changing it would
+wipe the data on the next flash.
 
 ## Where to tweak
 
-- **Poll interval, endpoints, PIN, timezone:** via the screen (Settings) or in `config.h`.
-- **Theme colors / layout:** top of `claude_stick.ino` (palette) and the `build_tile_*` builders.
-- **Mascots / threshold moments:** `show_moment()` in `claude_stick.ino`.
-- **Incident dialog:** `show_incident()` / `incident_sync()` in `claude_stick.ino`.
+- **Poll interval, timezone, brightness, language:** on screen (`/ajustes`).
+- **Endpoints, timeouts, PIN rules, status poll, dot timing:** `config.h`.
+- **Colors and fonts:** `src/ui/theme.h` (THEP palette roles).
+- **Home layouts:** the `SPEC[]` table at the top of `src/ui/screen_home.cpp`.
+- **Status dot rules:** `src/logic/dot_state.cpp`; **error classes:** `src/logic/classify.cpp`.
+- **Settings list:** `screen_settings_build()` in `src/ui/screen_settings.cpp`.
+- **Threshold moments / incident alert:** `src/ui/overlay_moment.cpp` /
+  `src/ui/overlay_incident.cpp` (`incident_sync()`).
+- **On-screen texts:** `src/ui/i18n.h` and the `TRS("pt", "en")` calls in each screen.
 
 ---
 

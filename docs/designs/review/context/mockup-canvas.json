@@ -1,0 +1,25 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-08T21:40:00Z"},
+  "title": "THEP Usage Stick — Estilos",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 480, "h": 320, "title": "A · Terminal"},
+    "Painel.dc.html": {"x": 560, "y": 0, "w": 480, "h": 320, "title": "B · Painel"},
+    "Matriz.dc.html": {"x": 1120, "y": 0, "w": 480, "h": 320, "title": "C · Matriz LED"},
+    "Home.dc.html": {"x": 0, "y": 760, "w": 480, "h": 320, "title": "Hermes · 2 contas", "is_interactive": true},
+    "Uma.dc.html": {"x": 560, "y": 760, "w": 480, "h": 320, "title": "Hermes · 1 conta"},
+    "Tres.dc.html": {"x": 1120, "y": 760, "w": 480, "h": 320, "title": "Hermes · 3 contas"},
+    "Quatro.dc.html": {"x": 1680, "y": 760, "w": 480, "h": 320, "title": "Hermes · 4 contas"},
+    "Menu.dc.html": {"x": 2240, "y": 760, "w": 480, "h": 320, "title": "Hermes · menu aberto"}
+  },
+  "order": ["Main.dc.html", "Painel.dc.html", "Matriz.dc.html", "Home.dc.html", "Uma.dc.html", "Tres.dc.html", "Quatro.dc.html", "Menu.dc.html"],
+  "notes": {
+    "titulo": {"x": 0, "y": -260, "text": "Tela inicial · 2 contas · 480×320", "kind": "title1", "maxW": 1600},
+    "hermes": {"x": 0, "y": 500, "text": "Estilo A · identidade Hermes, cores THEP", "kind": "title1", "maxW": 2720}
+  },
+  "designSystems": [
+    {"title": "THEP — Design System", "namespace": "thep", "artifact": "https://claude.ai/artifact/RQgM1nHRZn5UqPRrHWdy3a", "version": "1794174985-22e5", "copiedAt": "2026-11-08T21:40:00Z"}
+  ]
+}

@@ -49,7 +49,7 @@ SCREEN_WIDTH=480  SCREEN_HEIGHT=320
 
 | Lib | Versão | Uso |
 |---|---|---|
-| `esp32` (core) | **3.3.11** | toolchain ESP32‑S3 |
+| `esp32` (core) | **3.3.8** | toolchain ESP32‑S3 (a v3 foi validada nesta versão; as APIs de timeout do `HTTPClient` foram conferidas nela) |
 | `GFX Library for Arduino` (Arduino_GFX) | **1.6.5** | driver QSPI + Canvas (`Arduino_ESP32QSPI`, `Arduino_AXS15231B`, `Arduino_Canvas`) |
 | `lvgl` | **9.2.2** | UI (API v9: `lv_display_create`, etc.) |
 | `ArduinoJson` | **7.2.0** | parse do payload do backend |
@@ -101,6 +101,20 @@ static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 
 > Esse flush usa **render mode FULL** (o LVGL entrega a tela inteira de uma vez). Por isso o buffer do LVGL é do tamanho da tela toda (480×320) e mora na **PSRAM**.
 
+### ⭐ v3: render parcial em faixas de linhas nativas (padrão desde 2026-11-09)
+
+O flush acima (FULL + rotação pixel a pixel) custa **~96–109 ms por quadro** no firmware: qualquer invalidação, até o ponto pulsante do cabeçalho, gira e envia os 480×320. O firmware v3 usa, por padrão, `DISP_BANDS=1` + `DISP_ROT_FAST=1` (`claude_stick/config.h`, `disp_flush_cb` no `.ino`):
+
+- **Render `LV_DISPLAY_RENDER_MODE_PARTIAL`**, com o buffer do LVGL ainda do tamanho da tela (na PSRAM), para cada área invalidada sair inteira de uma vez.
+- **Rotação em blocos 16×16** (`src/logic/rot270`, gravação de 32 bits): cada área é girada para o framebuffer do Canvas, que guarda o resto da imagem. Mesma imagem da rotação pixel a pixel, **< 1 ms** por quadro.
+- **Envio de linhas nativas inteiras a partir da linha 0.** O pixel de paisagem `(lx, ly)` vai para a linha nativa `479 − lx`, então uma área `[x1..x2]` toca as linhas nativas `[479−x2 .. 479−x1]`; a borda **direita** da paisagem é a linha nativa 0. No fim do quadro vai ao painel o prefixo `0 .. r1` (`draw16bitRGBBitmap(0, 0, …, 320, r1+1)`), com `r1 = 479 − (menor x1 do quadro)`.
+
+**Por que um prefixo e não a faixa exata:** o AXS15231B em QSPI **ignora a janela de linhas (RASET)**. O primeiro modo parcial mandava `CASET 0..319` + `RASET r0..r1` e o conteúdo saiu deslocado na horizontal (na paisagem, linha nativa errada): o `RAMWR` recomeça na linha 0. É o que o driver da Espressif (`esp_lcd_axs15231b`) assume: em QSPI ele nem manda RASET, usa `RAMWR` (0x2C) para a faixa que começa na linha 0 e `RAMWRC` (0x3C) para as seguintes, em ordem. `DISP_BANDS=2` repete o envio com RASET, só como experimento.
+
+**Medido na placa** (`[HEAP]` e `/health`): pior quadro **44–46 ms**, com `rows_max` 459 (a troca do relógio do rodapé, na borda esquerda da paisagem, obriga a mandar quase a tela toda); rotação < 1 ms; envio ~37 ms. Um degrau do pulso do ponto (x ≈ 368–378) manda só ~112 linhas, e o pulso ficou no ciclo aprovado: 4 degraus (100/70/40/70%), um a cada 400 ms (`DOT_PULSE_STEP_MS`, ciclo de 1,6 s). O requisito de quadro < 40 ms vale para tudo, exceto os quadros que tocam a borda esquerda.
+
+**Rotação pelo painel não existe:** o AXS15231B em QSPI só espelha (MADCTL MX/MY); trocar eixos (MV) não funciona nele, por isso a rotação continua no software. Para voltar ao modo FULL: `THEP_FLAGS="-DDISP_BANDS=0" ./build.sh upload-dev`.
+
 ---
 
 ## 5. LVGL 9 — setup
@@ -126,9 +140,10 @@ No **loop**: `lv_task_handler();` + `delay(16);` (~60 fps). Atualizar telas com 
 
 ### `lv_conf.h` (pontos críticos)
 - `LV_COLOR_DEPTH 16` (RGB565).
-- Habilitar as fontes Montserrat usadas: 10, 12, 14, 18, 24, 28.
+- Fontes: na v3 só a **Montserrat 14** fica ligada, como fallback das JetBrains Mono geradas (ícones `LV_SYMBOL_*`, como o `↻`). As outras Montserrat foram desligadas.
 - `LV_USE_OS 0` (loop cooperativo) e tick via `lv_tick_set_cb` (acima).
-- PSRAM: o buffer é alocado manualmente, então `LV_MEM_*` pode ficar no default (RAM interna) para o resto.
+- PSRAM: o buffer de tela é alocado manualmente. Na v3 o pool do LVGL (`LV_MEM_SIZE`, 96 KB) também vai para a PSRAM, por `LV_MEM_POOL_INCLUDE "hw/lv_pool.h"` + `LV_MEM_POOL_ALLOC(size)`, para sobrar RAM interna para as sessões TLS (~40–50 KB cada). Medido: ~166 KB de heap interno livre durante os ciclos, maior bloco ~98–106 KB.
+- `LV_USE_LOG` ligado só na build `THEP_DEV` (callback que escreve na `Serial`).
 
 ---
 
@@ -182,9 +197,9 @@ e dá parse no payload enxuto (ver `../docs/03-CONTRATO-API.md`). O device token
 
 ## 10. Build & upload (arduino-cli)
 
-- **arduino-cli 1.4.1**, core **esp32:esp32 3.3.11** já instalados.
+- **arduino-cli 1.4.1**, core **esp32:esp32 3.3.8** já instalados.
 - **Placa conectada:** `/dev/cu.usbmodem101`.
-- `partitions.csv` (16 MB): app0 2 MB + spiffs ~14 MB (LittleFS monta a partição "spiffs").
+- `partitions.csv` (16 MB): `nvs`, `otadata`, `app0` + `app1` (3 MB cada; não há OTA, o firmware roda sempre do `app0`), `spiffs` ~9,9 MB (o LittleFS monta essa partição) e `coredump`. Não mudar: qualquer mudança apaga os dados no próximo flash.
 
 FQBN recomendado (ESP32‑S3 + **PSRAM OPI** + 16 MB + partição custom + **USB CDC**):
 ```bash
@@ -237,19 +252,25 @@ arduino-cli monitor -p /dev/cu.usbmodem101 -c baudrate=115200
 > oficiais, animações de limiar, i18n). Valem para qualquer firmware desta placa.
 
 - 🔴 **Fontes Montserrat embutidas só têm ASCII + `°` (0xB0) + bullet `•` (0x2022).**
-  Nada de acentos nem travessão (—) — renderizam como glifo faltante. Escrever a UI sem
-  acento e usar o bullet UTF-8 (`"\xE2\x80\xA2"`) como separador visual.
+  Nada de acentos nem travessão (—) — renderizam como glifo faltante. A v2.x escrevia a UI
+  sem acento por isso. A v3 resolve com fontes geradas: JetBrains Mono 2.304 com Latin-1,
+  box drawing, `█ ░` e `❯ ✓ ✗ ⚠ …` (`tools/gen_fonts.sh`, `lv_font_conv` bpp 4), com a
+  Montserrat 14 só como fallback. O fallback é um campo `const` no LVGL 9: entra na geração
+  (`--lv-fallback`), não em tempo de execução.
 - 🔴 **Protótipos automáticos do `.ino` quebram com tipos próprios**: uma função que
   retorna `MeuStruct*` ganha protótipo gerado NO TOPO do arquivo, antes da definição do
   struct → erro `'MeuStruct' does not name a type`. Solução: retornar índice `int`
   (ver `day_slot()` no sketch) ou usar só tipos já conhecidos (`lv_obj_t*` etc.).
-- 🟢 **Imagens embutidas (ARGB8888)**: `lv_image_dsc_t` na 9.2 aceita init posicional
-  `{{LV_IMAGE_HEADER_MAGIC, LV_COLOR_FORMAT_ARGB8888, 0, w, h, w*4, 0}, size, data}`
-  (ordem little-endian verificada em `src/draw/lv_image_dsc.h`). Bytes por pixel na
-  ordem **B,G,R,A**. Pipeline: `tools/gen_logo_assets.py` (rsvg-convert + Pillow)
-  rasteriza SVG → `logo_assets.h`.
-- 🟢 **`lv_obj_set_style_image_recolor(+_opa)`** tinge o sprite em runtime — usado para
-  deixar o Clawd cinza em estado de erro sem gerar um segundo asset.
+- 🟢 **Imagens embutidas**: `lv_image_dsc_t` na 9.2 aceita init posicional
+  `{{LV_IMAGE_HEADER_MAGIC, cf, 0, w, h, stride, 0}, size, data}` (ordem little-endian
+  verificada em `src/draw/lv_image_dsc.h`). A v2.x usava ARGB8888 (bytes **B,G,R,A**,
+  gerados pelo `gen_logo_assets.py`, removido na v3). A v3 usa
+  **`LV_COLOR_FORMAT_RGB565A8`**: o plano RGB565 inteiro e depois o plano de alfa (1 byte
+  por pixel), ~3 bytes por pixel em vez de 4. Pipeline: `tools/gen_hermes_assets.py`
+  (só Pillow) gera o logo THEP e o pássaro em braille → `src/ui/assets_thep.{h,c}`.
+- 🟢 **`lv_obj_set_style_image_recolor(+_opa)`** tinge a imagem em runtime — usado para
+  deixar o pássaro cinza no alerta de incidente (e, na v2.x, o Clawd em erro) sem gerar um
+  segundo asset.
 - 🟡 **Animações procedurais no `loop()` > `lv_anim`** para overlays que podem morrer a
   qualquer momento (toque fecha): `lv_anim` com `exec_cb` custom apontando para objetos
   deletados = crash. Padrão do firmware: guardar ponteiros num struct, animar por tempo

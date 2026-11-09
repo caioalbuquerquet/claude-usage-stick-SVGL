@@ -24,3 +24,10 @@ firmware/*/build/
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# binários de backup locais (não versionar)
+backups/
+
+# ───────── Ferramentas ─────────
+# tools/.cache/: TTF baixadas e venv do tools/gen_fonts.sh
+tools/.cache/
