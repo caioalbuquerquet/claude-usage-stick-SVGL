@@ -29,13 +29,19 @@
 
 /*=========================
    MEMÓRIA
-   Pool interno do LVGL (objetos/estilos). O buffer de render full-screen
-   (480x320x2) é alocado à parte na PSRAM, dentro do sketch.
+   Pool do LVGL (objetos/estilos), alocado na PSRAM em lv_init() por
+   thep_lv_pool_alloc (src/hw/lv_pool.c), para deixar a RAM interna às
+   sessões TLS. As duas macros só valem com LV_MEM_ADR == 0 (o padrão);
+   são lidas por lv_mem_core_builtin.c. O include resolve pelo -I src do
+   build.sh. O buffer de render full-screen (480x320x2) é alocado à parte
+   na PSRAM, dentro do sketch.
  *=========================*/
 #define LV_USE_STDLIB_MALLOC   LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING   LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF  LV_STDLIB_BUILTIN
 #define LV_MEM_SIZE            (96 * 1024U)
+#define LV_MEM_POOL_INCLUDE    "hw/lv_pool.h"
+#define LV_MEM_POOL_ALLOC(size) thep_lv_pool_alloc(size)
 
 /*====================
    HAL / SISTEMA
