@@ -33,6 +33,7 @@
 #include "model/accounts.h"
 #include "model/account_state.h"
 #include "model/history.h"
+#include "logic/projection.h"
 #include "app/web_api.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
@@ -1260,7 +1261,12 @@ static void trend_redraw() {
   lv_obj_set_pos(g_ui.trDot, cx - 4, cy - 4);
   lv_obj_clear_flag(g_ui.trDot, LV_OBJ_FLAG_HIDDEN);
 
-  if (n < 3) {
+  // Estado, hora de esgotar e % no reset vêm de projection() (src/logic).
+  // Os textos continuam os da v2.3: projection_text() usa glifos (✓ ✗ ·) que
+  // as fontes Montserrat de hoje não têm; ela entra com a fonte nova (fase 3).
+  ProjResult pr = projection(hist, histN, histHead, a.usage.h5, we, (uint32_t)now);
+
+  if (pr.st == ProjResult::SEM_DADOS) {
     lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
     lv_label_set_text(g_ui.trCap, TRS("Coletando dados... (~alguns minutos)",
                                       "Collecting data... (~a few minutes)"));
@@ -1269,23 +1275,8 @@ static void trend_redraw() {
     return;
   }
 
-  // taxa: janela dos últimos 45 min
-  float rate = 0;                    // %/min
-  {
-    Sample first = {0, 0, 0};
-    for (int i = 0; i < histN; i++) {
-      Sample s = hist[(histHead - histN + i + HIST_MAX * 2) % HIST_MAX];
-      if (s.t == 0 || s.t < ws) continue;
-      if (s.t >= (uint32_t)now - 2700) { first = s; break; }
-    }
-    if (first.t != 0 && (uint32_t)now > first.t + 300) {
-      float dt = ((uint32_t)now - first.t) / 60.0f;
-      rate = (a.usage.h5 - first.h5) / dt;
-    }
-  }
-
   char e[32];
-  if (a.usage.h5 >= 99.5f) {
+  if (pr.st == ProjResult::ESGOTADA) {
     lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
     fmt_eta(we, e, sizeof(e));
     snprintf(b, sizeof(b), TRS("Janela esgotada \xE2\x80\xA2 reseta em %s",
@@ -1295,36 +1286,35 @@ static void trend_redraw() {
     snprintf(b, sizeof(b), TRS("Esgotada \xE2\x80\xA2 reseta em %s",
                                "Exhausted \xE2\x80\xA2 resets in %s"), e);
     set_ag_proj(b, C_BAD);
-  } else if (rate > 0.02f) {
-    float minsLeft = (100.0f - a.usage.h5) / rate;
-    uint32_t etaT = (uint32_t)now + (uint32_t)(minsLeft * 60);
+  } else if (pr.st == ProjResult::ESGOTA) {
     g_trProjPts[0].x = cx; g_trProjPts[0].y = cy;
-    if (etaT <= we) {
-      g_trProjPts[1].x = tr_x(etaT, ws, we);
-      g_trProjPts[1].y = tr_y(100);
-      char hm[12]; fmt_hm(etaT, hm, sizeof(hm));
-      snprintf(b, sizeof(b), TRS("No ritmo atual, esgota as %s (em %dh%02dm)",
-                                 "At this pace, runs out at %s (in %dh%02dm)"),
-               hm, (int)minsLeft / 60, (int)minsLeft % 60);
-      lv_label_set_text(g_ui.trCap, b);
-      lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(minsLeft < 60 ? C_BAD : C_WARN), 0);
-      snprintf(b, sizeof(b), TRS("Esgota as %s (em %dh%02dm)", "Runs out at %s (in %dh%02dm)"),
-               hm, (int)minsLeft / 60, (int)minsLeft % 60);
-      set_ag_proj(b, minsLeft < 60 ? C_BAD : C_WARN);
-    } else {
-      float endPct = a.usage.h5 + rate * ((we - (uint32_t)now) / 60.0f);
-      g_trProjPts[1].x = tr_x(we, ws, we);
-      g_trProjPts[1].y = tr_y(endPct);
-      snprintf(b, sizeof(b), TRS("No ritmo atual, NAO esgota antes do reset (~%d%%)",
-                                 "At this pace, does NOT run out before reset (~%d%%)"),
-               (int)(endPct + 0.5f));
-      lv_label_set_text(g_ui.trCap, b);
-      lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
-      snprintf(b, sizeof(b), TRS("NAO esgota antes do reset (%d%%)",
-                                 "Does NOT run out before reset (%d%%)"),
-               (int)(endPct + 0.5f));
-      set_ag_proj(b, C_OK);
-    }
+    g_trProjPts[1].x = tr_x(pr.etaEpoch, ws, we);
+    g_trProjPts[1].y = tr_y(100);
+    char hm[12]; fmt_hm(pr.etaEpoch, hm, sizeof(hm));
+    uint32_t col = pr.minutes < 60 ? C_BAD : C_WARN;
+    snprintf(b, sizeof(b), TRS("No ritmo atual, esgota as %s (em %dh%02dm)",
+                               "At this pace, runs out at %s (in %dh%02dm)"),
+             hm, pr.minutes / 60, pr.minutes % 60);
+    lv_label_set_text(g_ui.trCap, b);
+    lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(col), 0);
+    snprintf(b, sizeof(b), TRS("Esgota as %s (em %dh%02dm)", "Runs out at %s (in %dh%02dm)"),
+             hm, pr.minutes / 60, pr.minutes % 60);
+    set_ag_proj(b, col);
+    lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
+  } else if (pr.rate > 0.02f) {
+    // OK_ATE_RESET com consumo relevante: linha até o reset, na % prevista
+    g_trProjPts[0].x = cx; g_trProjPts[0].y = cy;
+    g_trProjPts[1].x = tr_x(we, ws, we);
+    g_trProjPts[1].y = tr_y(pr.pctAtReset);
+    snprintf(b, sizeof(b), TRS("No ritmo atual, NAO esgota antes do reset (~%d%%)",
+                               "At this pace, does NOT run out before reset (~%d%%)"),
+             pr.pctAtReset);
+    lv_label_set_text(g_ui.trCap, b);
+    lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
+    snprintf(b, sizeof(b), TRS("NAO esgota antes do reset (%d%%)",
+                               "Does NOT run out before reset (%d%%)"),
+             pr.pctAtReset);
+    set_ag_proj(b, C_OK);
     lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
   } else {
     lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
