@@ -253,6 +253,8 @@ void scheduler_on_result(const NetResult& r) {
         // scheduler_start() já agenda para o próximo tick).
         if (r.cycle == 0 && r.cls == FC_OK) s_nextCycleMs = millis();
     }
+    // Rede nova da tela de WiFi: consulta assim que o agendador voltar.
+    if (r.type == JOB_WIFI_JOIN && r.cls == FC_OK) s_nextCycleMs = millis();
     // Só conta o que o ciclo aberto mandou: VALIDATE e o RECONNECT do boot
     // vêm com cycle 0, e um resultado de ciclo cancelado tem outro id.
     if (cycle_on_result(s_cyc, r.cycle)) end_cycle(r);

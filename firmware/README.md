@@ -59,7 +59,7 @@ AUTH) e `[HEAP]` (heap, stack da task e tempos de quadro: `frame_max`, `flush_ma
 | | `history` | Histórico, heatmap por hora/dia e `/hist{0..3}.bin` no LittleFS (formato da v2.3) |
 | `net/` | `poller` | `net_task` (core 0, 14 KB de stack), filas `jobQ`/`resQ`, aplicação dos resultados no `loop()` e o reinício por requisição travada (> 90 s) |
 | | `scheduler` | Ciclos de consulta no `loop()`: pré-condições (WiFi, NTP), um `USAGE` por conta, rodízio de modelos na conta em foco, `STATUS` a cada `STATUS_POLL_SEC`, espera do AUTH, pausa na tela de WiFi, fuso |
-| | `token_store` | Tokens decifrados, token em validação e cópia das redes, tudo sob um mutex |
+| | `token_store` | Tokens decifrados, token em validação, cópia das redes (`RECONNECT`) e a rede nova da tela de WiFi (`WIFI_JOIN`), tudo sob um mutex |
 | | `api`, `status`, `certs` | Consulta de uso (headers `unified-*`), incidentes do `status.claude.com` e as CAs raiz |
 | `sec/` | `crypto` | AES-256-GCM, chave derivada do PIN (SHA-256 × 10.000, salt = MAC) e a chave da sessão |
 | `ui/` | `shell`, `overlay_menu` | Shell fixo (cabeçalho com logo, ponto pulsante e `❯ menu`; painel com título na borda; rodapé) e o menu modal |
@@ -87,15 +87,19 @@ O `claude_stick.ino` ficou com o hardware (display, touch, backlight), o PIN e a
 
 O LVGL roda sem suporte a threads (`LV_USE_OS LV_OS_NONE`). Por isso:
 
-- **`net_task`** (core 0): é a única que abre HTTPS e a única que mexe no rádio depois do
-  desbloqueio (job `RECONNECT`). **Nunca** chama `lv_*`, nunca escreve no modelo e nunca acessa
+- **`net_task`** (core 0): é a única que abre HTTPS e a única que conecta o rádio (jobs
+  `RECONNECT` e `WIFI_JOIN`; a tela de WiFi só faz o scan assíncrono pelo `loop()`, com o
+  agendador pausado e depois de esperar o `poller_idle()`). **Nunca** chama `lv_*`, nunca escreve no modelo e nunca acessa
   LittleFS ou NVS. Lê o token do slot com `token_store_copy*` para um buffer de stack, que zera no
   fim do job.
 - **`loop()`** (core 1): é o **único dono** do modelo (`acct[]`, `g_accts`), do LVGL, do LittleFS e
   da NVS. Monta os jobs (`scheduler`, `web_api`) e aplica os resultados
   (`poller_apply_results()`).
-- **Comunicação:** duas filas FreeRTOS. `jobQ` (loop → net) leva `{tipo, slot, gen, modelo}`,
-  **sem token**; `resQ` (net → loop) leva o resultado.
+- **Comunicação:** duas filas FreeRTOS. `jobQ` (loop → net) leva `{tipo, slot, gen, ciclo,
+  modelo}`, **sem token**; `resQ` (net → loop) leva o resultado.
+- **Id de ciclo:** cada job do agendador leva o id do ciclo que o mandou, e só os resultados com
+  o id do ciclo aberto contam para fechá-lo (`logic/cycle`). O `RECONNECT` do boot
+  (`scheduler_request_reconnect`, antes do PIN), o `VALIDATE` e o `WIFI_JOIN` vão com id 0.
 - **`gen` por slot:** muda ao adicionar, remover ou trocar o token. A task não consulta um job com
   `gen` diferente do da tabela (devolve `FC_DISCARDED`), e o `loop()` descarta um resultado com
   `gen` velho, então uma resposta atrasada nunca cai numa conta removida.

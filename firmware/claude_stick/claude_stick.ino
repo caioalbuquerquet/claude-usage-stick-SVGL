@@ -485,6 +485,12 @@ static void web_tok_stats_cb() {
   else if (app_content() == ContentId::TREND) screen_trend_refresh();
 }
 
+// Resultado do WIFI_JOIN da tela de WiFi (hook onWifiJoin do poller).
+static void on_wifi_join(bool ok) {
+  if (ok) ensure_mdns();
+  screen_wifi_on_join(ok);
+}
+
 // Resultado do VALIDATE (hook onValidate do poller; item 6, passos 4, 7 e 8).
 static void on_validate_result(const NetResult &r) {
   if (r.cls == FC_DISCARDED || r.gen != web_token_seq()) {
@@ -694,7 +700,7 @@ void setup() {
   token_store_init();               // antes da net_task existir
   g_wifi.begin();
   poller_start();                   // VALIDATE já no onboarding (item 6)
-  PollerHooks hooks = {incident_sync, on_validate_result, ensure_mdns};
+  PollerHooks hooks = {incident_sync, on_validate_result, ensure_mdns, on_wifi_join};
   poller_set_hooks(hooks);
   scheduler_set_moment_hook(show_moment);
 

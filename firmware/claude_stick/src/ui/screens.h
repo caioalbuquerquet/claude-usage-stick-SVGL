@@ -62,6 +62,8 @@ void screen_wifi_build(lv_obj_t* parent);
 // andamento (até lá a tela só mostra "aguardando a rede…").
 void screen_wifi_tick();
 void screen_wifi_full_tick();
+// Resultado do WIFI_JOIN (hook do poller, no loop()); a rede já foi gravada.
+void screen_wifi_on_join(bool ok);
 void screen_wifi_reset();
 
 // ---- Token: tela cheia no onboarding (ST_TOKEN) ou conteúdo TOKEN ----

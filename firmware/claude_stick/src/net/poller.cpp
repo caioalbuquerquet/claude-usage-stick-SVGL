@@ -25,7 +25,7 @@ namespace {
 QueueHandle_t s_jobQ = nullptr;
 QueueHandle_t s_resQ = nullptr;
 TaskHandle_t s_task = nullptr;
-PollerHooks s_hooks = {nullptr, nullptr, nullptr};
+PollerHooks s_hooks = {nullptr, nullptr, nullptr, nullptr};
 
 // Escrito só pela task, lido pelo loop(). 32 bits: leitura atômica no Xtensa.
 volatile uint32_t s_reqStartMs = 0;
@@ -38,6 +38,7 @@ const char* job_name(JobType t) {
         case JOB_STATUS:    return "STATUS";
         case JOB_VALIDATE:  return "VALIDATE";
         case JOB_RECONNECT: return "RECONNECT";
+        case JOB_WIFI_JOIN: return "WIFI_JOIN";
     }
     return "?";
 }
@@ -131,6 +132,23 @@ void run_reconnect(NetResult& r) {
     r.netIdx = (int8_t)idx;
 }
 
+// Rede nova da tela de WiFi: só conecta (a gravação no NVS fica no loop()).
+void run_wifi_join(NetResult& r) {
+    static WiFiManager::SavedNet net;   // só a task usa
+    uint32_t t0 = millis();
+    mark_req_start();
+    bool ok = false;
+    int idx = -1;
+    if (token_store_copy_join(&net))
+        ok = WiFiManager::connectList(&net, 1, WIFI_JOIN_TIMEOUT_MS, &idx);
+    mbedtls_platform_zeroize(&net, sizeof(net));
+    uint32_t dt = millis() - t0;
+    r.cls = ok ? FC_OK : FC_NOWIFI;
+    r.http = 0;
+    r.ms = dt > 65000 ? 65000 : (uint16_t)dt;
+    r.netIdx = (int8_t)idx;
+}
+
 void log_result(const NetJob& job, const NetResult& r) {
     switch (job.type) {
         case JOB_USAGE:
@@ -153,6 +171,9 @@ void log_result(const NetJob& job, const NetResult& r) {
         case JOB_RECONNECT:
             Serial.printf("[NET] RECONNECT cls=%s ms=%u net=%d\n", fetch_class_name(r.cls),
                           (unsigned)r.ms, r.netIdx);
+            break;
+        case JOB_WIFI_JOIN:
+            Serial.printf("[NET] WIFI_JOIN cls=%s ms=%u\n", fetch_class_name(r.cls), (unsigned)r.ms);
             break;
     }
 }
@@ -177,6 +198,7 @@ void net_task(void*) {
             case JOB_VALIDATE:  run_validate(job, r, tok, sizeof(tok)); break;
             case JOB_STATUS:    run_status(r); break;
             case JOB_RECONNECT: run_reconnect(r); break;
+            case JOB_WIFI_JOIN: run_wifi_join(r); break;
         }
         mbedtls_platform_zeroize(tok, sizeof(tok));   // o token nunca sai da task
 
@@ -227,6 +249,17 @@ void apply_one(const NetResult& r) {
                 if (s_hooks.onReconnected) s_hooks.onReconnected();
             }
             break;
+        case JOB_WIFI_JOIN: {
+            bool ok = r.cls == FC_OK;
+            if (ok) {                         // grava a rede nova (NVS: só no loop())
+                static WiFiManager::SavedNet net;
+                if (token_store_copy_join(&net)) g_wifi.addNetwork(net.ssid, net.pass);
+                mbedtls_platform_zeroize(&net, sizeof(net));
+            }
+            token_store_clear_join();
+            if (s_hooks.onWifiJoin) s_hooks.onWifiJoin(ok);
+            break;
+        }
     }
 }
 

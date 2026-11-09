@@ -4,6 +4,9 @@
 // leva ao ST_WIFI chama scheduler_stop): a tela mostra "aguardando a rede…"
 // até a net_task terminar o job em andamento (o RECONNECT do boot, um ciclo
 // interrompido pelo Apagar tudo) e só então mexe no rádio.
+//
+// Nada aqui bloqueia o loop(): o scan é assíncrono (scanStart no evento,
+// scanPoll no tick) e a conexão com a senha é o job WIFI_JOIN da net_task.
 #include <Arduino.h>
 #include <WiFi.h>
 #include <string.h>
@@ -12,6 +15,7 @@
 #include "config.h"
 #include "hw/wifi_manager.h"
 #include "net/poller.h"
+#include "net/token_store.h"
 #include "app/web_api.h"
 #include "app/app_state.h"
 #include "ui/screens.h"
@@ -29,17 +33,32 @@ lv_obj_t* s_ta = nullptr;
 lv_obj_t* s_kb = nullptr;
 lv_obj_t* s_status = nullptr;
 bool s_waiting = false;
+bool s_scanning = false;   // scan assíncrono em andamento (scan_poll no tick)
+bool s_joining = false;    // WIFI_JOIN na net_task (vale mesmo fora da tela)
 char s_sel[33] = {0};
 char s_ssid[MAX_NETS][33];
 
 void item_cb(lv_event_t* e);
 
+const char* no_nets_text() {
+  return TRS("nenhuma rede · toque em reescanear", "no networks · tap rescan");
+}
+
+// Dispara o scan sem bloquear o loop(); a lista chega em scan_poll().
 void populate() {
+  if (s_joining) return;
   lv_obj_clean(s_list);
   lv_label_set_text(s_status, TRS("escaneando redes…", "scanning networks…"));
-  lv_refr_now(NULL);
+  s_scanning = g_wifi.scanStart();
+  if (!s_scanning) lv_label_set_text(s_status, no_nets_text());
+}
+
+void scan_poll() {
+  if (!s_scanning || !s_list) return;
   WiFiManager::NetworkInfo nets[MAX_NETS];
-  int n = g_wifi.scanNetworks(nets, MAX_NETS);
+  int n = g_wifi.scanPoll(nets, MAX_NETS);
+  if (n < 0) return;                     // ainda escaneando
+  s_scanning = false;
   for (int i = 0; i < n; i++) {
     strlcpy(s_ssid[i], nets[i].ssid, sizeof(s_ssid[i]));
     char rssi[12];
@@ -51,14 +70,17 @@ void populate() {
       lv_obj_set_style_text_color(val, lv_color_hex(C_DIM), 0);
     }
   }
-  lv_label_set_text(s_status, n > 0 ? TRS("toque na sua rede", "tap your network")
-                                    : TRS("nenhuma rede · toque em reescanear",
-                                          "no networks · tap rescan"));
+  lv_label_set_text(s_status, n > 0 ? TRS("toque na sua rede", "tap your network") : no_nets_text());
+}
+
+void show_failed() {
+  lv_label_set_text(s_status, TRS("falhou · toque numa rede de novo", "failed · tap a network again"));
+  lv_obj_clear_flag(s_list, LV_OBJ_FLAG_HIDDEN);
 }
 
 void item_cb(lv_event_t* e) {
   int i = (int)(intptr_t)lv_event_get_user_data(e);
-  if (i < 0 || i >= MAX_NETS) return;
+  if (i < 0 || i >= MAX_NETS || s_joining) return;
   strlcpy(s_sel, s_ssid[i], sizeof(s_sel));
   char m[64];
   snprintf(m, sizeof(m), TRS("senha de \"%s\":", "password for \"%s\":"), s_sel);
@@ -73,20 +95,25 @@ void item_cb(lv_event_t* e) {
 void kb_cb(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
   if (code == LV_EVENT_READY) {
-    const char* pass = lv_textarea_get_text(s_ta);
-    lv_label_set_text(s_status, TRS("conectando…", "connecting…"));
+    if (s_joining) return;
+    // A conexão (até WIFI_JOIN_TIMEOUT_MS) roda na net_task, não aqui: a
+    // senha vai para o token_store e sai do textarea; o resultado chega por
+    // screen_wifi_on_join(), e a rede é gravada no NVS pelo loop().
+    token_store_set_join(s_sel, lv_textarea_get_text(s_ta));
+    lv_textarea_set_text(s_ta, "");
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_ta, LV_OBJ_FLAG_HIDDEN);
-    lv_refr_now(NULL);
-    bool ok = g_wifi.connectTo(s_sel, pass, 15000);
-    if (ok) {
-      ensure_mdns();
-      if (session_unlocked()) shell_show(ContentId::HOME);
-      else request_state(ST_TOKEN);
-    } else {
-      lv_label_set_text(s_status, TRS("falhou · toque numa rede de novo", "failed · tap a network again"));
-      lv_obj_clear_flag(s_list, LV_OBJ_FLAG_HIDDEN);
+    NetJob j = {};
+    j.type = JOB_WIFI_JOIN;
+    j.slot = -1;
+    j.modelIdx = -1;
+    if (!poller_enqueue(j)) {
+      token_store_clear_join();
+      show_failed();
+      return;
     }
+    s_joining = true;
+    lv_label_set_text(s_status, TRS("conectando…", "connecting…"));
   } else if (code == LV_EVENT_CANCEL) {
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_ta, LV_OBJ_FLAG_HIDDEN);
@@ -104,7 +131,6 @@ void rescan_cb(lv_event_t* e) {
 void build(lv_obj_t* p, int h, bool inShell) {
   const lv_font_t* f11 = theme_font(FONT_11);
 
-  (void)inShell;
   s_waiting = !poller_idle();
   if (s_waiting) {
     lv_obj_t* w = mklabel(p, tr(T::WAITING_NET), theme_font(FONT_13), C_DIM);
@@ -155,6 +181,7 @@ void screen_wifi_tick() {
     s_waiting = false;
     shell_show(ContentId::WIFI);
   }
+  scan_poll();
 }
 
 void screen_wifi_full_tick() {
@@ -162,9 +189,24 @@ void screen_wifi_full_tick() {
     s_waiting = false;
     request_state(ST_WIFI);              // monta de novo, agora com a lista
   }
+  scan_poll();
+}
+
+void screen_wifi_on_join(bool ok) {
+  s_joining = false;
+  if (ok) {
+    if (!session_unlocked()) {
+      if (app_state() == ST_WIFI) request_state(ST_TOKEN);
+    } else if (s_status) {
+      shell_show(ContentId::HOME);       // ainda na tela de WiFi
+    }
+    return;
+  }
+  if (s_status) show_failed();
 }
 
 void screen_wifi_reset() {
   s_list = s_ta = s_kb = s_status = nullptr;
   s_waiting = false;
+  s_scanning = false;   // um scan que ainda roda é retomado pelo próximo scanStart
 }

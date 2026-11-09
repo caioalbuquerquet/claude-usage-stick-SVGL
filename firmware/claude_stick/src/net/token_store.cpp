@@ -17,6 +17,9 @@ bool s_hasPending = false;
 WiFiManager::SavedNet s_nets[MAX_SAVED_NETWORKS];
 int s_netsN = 0;
 
+WiFiManager::SavedNet s_join;
+bool s_hasJoin = false;
+
 void ensure_mutex() {
     if (!s_mx) s_mx = xSemaphoreCreateMutexStatic(&s_mxBuf);
 }
@@ -77,6 +80,8 @@ void token_store_clear_all() {
     zero(s_tokens, sizeof(s_tokens));
     zero(s_nets, sizeof(s_nets));
     s_netsN = 0;
+    zero(&s_join, sizeof(s_join));
+    s_hasJoin = false;
 }
 
 bool token_store_copy(int slot, uint16_t gen, char* buf, size_t bufLen) {
@@ -150,4 +155,26 @@ int token_store_copy_reconnect(WiFiManager::SavedNet* out) {
     Lock l;
     for (int i = 0; i < s_netsN; i++) out[i] = s_nets[i];
     return s_netsN;
+}
+
+void token_store_set_join(const char* ssid, const char* pass) {
+    Lock l;
+    zero(&s_join, sizeof(s_join));
+    strlcpy(s_join.ssid, ssid ? ssid : "", sizeof(s_join.ssid));
+    strlcpy(s_join.pass, pass ? pass : "", sizeof(s_join.pass));
+    s_hasJoin = s_join.ssid[0] != '\0';
+}
+
+bool token_store_copy_join(WiFiManager::SavedNet* out) {
+    if (!out) return false;
+    Lock l;
+    if (!s_hasJoin) { zero(out, sizeof(*out)); return false; }
+    *out = s_join;
+    return true;
+}
+
+void token_store_clear_join() {
+    Lock l;
+    zero(&s_join, sizeof(s_join));
+    s_hasJoin = false;
 }

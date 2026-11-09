@@ -45,6 +45,7 @@
 
 // ── Rede / API Claude ────────────────────────────────────
 #define WIFI_CONNECT_TIMEOUT_MS 8000
+#define WIFI_JOIN_TIMEOUT_MS    15000   // rede nova da tela de WiFi (job WIFI_JOIN)
 #define API_TIMEOUT_MS          8000     // leitura: espera máxima por dados (HTTPClient::setTimeout)
 #define NET_CONNECT_MS          5000     // conexão TCP (HTTPClient::setConnectTimeout)
 #define NET_HANDSHAKE_S         5        // handshake TLS, em SEGUNDOS (NetworkClientSecure::setHandshakeTimeout)

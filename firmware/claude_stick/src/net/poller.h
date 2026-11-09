@@ -16,7 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-enum JobType : uint8_t { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT };
+enum JobType : uint8_t { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT, JOB_WIFI_JOIN };
 
 // Job, sem token. gen é uint16_t (token_store); AccountState::gen (uint32_t)
 // entra truncado (gen & 0xFFFF) dos dois lados.
@@ -25,6 +25,8 @@ enum JobType : uint8_t { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT };
 //              (o resultado vai para acct[slot].probe[modelIdx]).
 //   VALIDATE:  slot = g_tokenTargetSlot (só log), gen = web_token_seq().
 //   STATUS, RECONNECT: slot = -1, gen = 0.
+//   WIFI_JOIN: rede escolhida na tela de WiFi (token_store_set_join); slot =
+//              -1, gen = 0. Se conectar, o loop() grava a rede no NVS.
 // cycle: id do ciclo do agendador que mandou o job (logic/cycle.h); 0 = fora
 // de ciclo (VALIDATE, RECONNECT do boot). Volta igual no NetResult.
 struct NetJob {
@@ -65,6 +67,7 @@ struct PollerHooks {
     void (*onStatus)();                       // depois de gravar g_status
     void (*onValidate)(const NetResult& r);   // resultado de um VALIDATE
     void (*onReconnected)();                  // depois de um RECONNECT com FC_OK
+    void (*onWifiJoin)(bool ok);              // resultado de um WIFI_JOIN (rede já gravada se ok)
 };
 
 // Cria jobQ/resQ (8 itens cada) e a net_task. Chamar no setup(), depois de

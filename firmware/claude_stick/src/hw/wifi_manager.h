@@ -72,8 +72,17 @@ public:
         return false;
     }
 
-    int scanNetworks(NetworkInfo *results, int max_results) {
-        int n = WiFi.scanNetworks();
+    // Scan assíncrono (tela de WiFi, no loop(), sem bloquear): scanStart()
+    // dispara e scanPoll() devolve -1 enquanto roda, ou quantas redes copiou
+    // (0 se o scan falhou ou passou do tempo do core).
+    bool scanStart() {
+        int r = WiFi.scanNetworks(true);
+        return r == WIFI_SCAN_RUNNING || r >= 0;
+    }
+    int scanPoll(NetworkInfo *results, int max_results) {
+        int n = WiFi.scanComplete();
+        if (n == WIFI_SCAN_RUNNING) return -1;
+        if (n < 0) { WiFi.scanDelete(); return 0; }
         int count = min(n, max_results);
         for (int i = 0; i < count; i++) {
             strncpy(results[i].ssid, WiFi.SSID(i).c_str(), 32);
@@ -143,6 +152,10 @@ public:
         Serial.println("WiFi: no saved network available");
         return false;
     }
+
+    // Grava (ou atualiza e promove) a rede no topo da lista, no NVS. Chamada
+    // pelo loop() quando o WIFI_JOIN da tela de WiFi conecta.
+    void addNetwork(const char *ssid, const char *pass) { _addNetwork(ssid, pass); }
 
     // Promove a rede idx para o topo e grava no NVS. Chamada pelo loop()
     // quando o resultado do RECONNECT chega (netIdx). idx <= 0 não faz nada.

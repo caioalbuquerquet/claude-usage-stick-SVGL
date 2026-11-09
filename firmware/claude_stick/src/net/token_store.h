@@ -6,7 +6,9 @@
 //     de cada slot e a geração com que foi gravado;
 //   · pending: token em validação (POST /token → job VALIDATE);
 //   · reconnect: cópia das redes salvas para o job RECONNECT, para a task
-//     não ler o NVS.
+//     não ler o NVS;
+//   · join: rede escolhida na tela de WiFi (SSID + senha) para o job
+//     WIFI_JOIN; o loop() grava no NVS se conectar.
 //
 // Quem escreve é o loop(); a net_task só copia. Toda cópia que sai daqui vai
 // para um buffer do chamador, que deve zerá-lo (memset) ao terminar. Tokens
@@ -56,3 +58,10 @@ void token_store_clear_pending();
 void token_store_set_reconnect(const WiFiManager::SavedNet* nets, int n);
 // net_task: copia para out[MAX_SAVED_NETWORKS] e devolve quantas.
 int  token_store_copy_reconnect(WiFiManager::SavedNet* out);
+
+// ── Rede nova para o WIFI_JOIN ───────────────────────────
+// loop(): grava antes de enfileirar (ssid até 32 bytes, pass até 64).
+void token_store_set_join(const char* ssid, const char* pass);
+// net_task (para conectar) e loop() (para gravar no NVS). Falso sem rede.
+bool token_store_copy_join(WiFiManager::SavedNet* out);
+void token_store_clear_join();
