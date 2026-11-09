@@ -41,16 +41,9 @@ const lv_font_t* theme_font(FontRole r) {
   }
   return &jbmono_13;
 #else
-  // Provisório até as fontes do item 30 chegarem.
-  switch (r) {
-    case FONT_11:      return &lv_font_montserrat_12;
-    case FONT_13:      return &lv_font_montserrat_14;
-    case FONT_BOLD_13: return &lv_font_montserrat_14;
-    case FONT_NUM_20:  return &lv_font_montserrat_20;
-    case FONT_NUM_30:  return &lv_font_montserrat_28;
-    case FONT_NUM_38:  return &lv_font_montserrat_40;
-    case FONT_NUM_50:  return &lv_font_montserrat_48;
-  }
+  // Sem as fontes geradas (item 30): tudo na Montserrat 14, a única que fica
+  // no lv_conf.h (item 42).
+  (void)r;
   return &lv_font_montserrat_14;
 #endif
 }
