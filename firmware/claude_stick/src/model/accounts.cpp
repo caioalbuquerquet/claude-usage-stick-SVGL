@@ -2,20 +2,10 @@
 #include <string.h>
 #include <strings.h>   // strcasecmp
 #include <stdio.h>
+#include "logic/label.h"
 
 static void keyName(const char* base, int slot, char* out, size_t sz) {
     snprintf(out, sz, "%s%d", base, slot);
-}
-
-static void sanitizeLabel(const char* in, char* out) {
-    int n = 0;
-    for (const char* c = in; *c && n < ACCT_LBL_MAX - 1; c++) {
-        if (*c < 0x20 || *c > 0x7E) continue;
-        if (*c == '"' || *c == '\\' || *c == '<' || *c == '>') continue;
-        out[n++] = *c;
-    }
-    while (n > 0 && out[n - 1] == ' ') n--;
-    out[n] = 0;
 }
 
 // Garante rotulo unico entre os slots em uso, acrescentando " 2", " 3"... quando
@@ -34,9 +24,8 @@ static void makeUnique(const AccountSlots& s, int slot, char* lbl) {
         for (int i = 0; i < ACCT_MAX; i++)
             if (i != slot && s.used[i] && strcasecmp(s.label[i], lbl) == 0) { clash = true; break; }
         if (!clash) return;
-        char trimmed[ACCT_LBL_MAX];
-        strlcpy(trimmed, base, ACCT_LBL_MAX - 2);   // reserva espaco p/ " N"
-        snprintf(lbl, ACCT_LBL_MAX, "%s %d", trimmed, n);
+        // corta a base sem partir um caractere UTF-8 para caber o " N"
+        label_with_suffix(base, n, lbl, ACCT_LBL_MAX);
     }
 }
 
@@ -97,7 +86,9 @@ void accountSave(Preferences& p, AccountSlots& s, int slot,
 void accountSetLabel(Preferences& p, AccountSlots& s, int slot, const char* label) {
     if (slot < 0 || slot >= ACCT_MAX || !s.used[slot]) return;
     char clean[ACCT_LBL_MAX];
-    sanitizeLabel(label ? label : "", clean);
+    // UTF-8 bem formado (o bridge manda os bytes crus e compara com strcmp),
+    // cortado em ACCT_LBL_MAX - 1 bytes numa fronteira de caractere
+    label_sanitize(label ? label : "", clean, sizeof(clean));
     if (!clean[0]) snprintf(clean, sizeof(clean), "Conta %d", slot + 1);
     makeUnique(s, slot, clean);
     char k[8];

@@ -131,7 +131,9 @@ class FakeStick(BaseHTTPRequestHandler):
     def do_POST(self):
         srv = self.server
         n = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(n).decode("utf-8"))
+        raw = self.rfile.read(n)
+        srv.raw_posts.append(raw)
+        body = json.loads(raw.decode("utf-8"))
         srv.requests.append(("POST", self.path, body))
         lbl = body.get("account") or srv.focused
         if srv.v23 and lbl != srv.focused:
@@ -149,6 +151,7 @@ class PushTest(unittest.TestCase):
         self.srv.v23 = False
         self.srv.post_404 = False
         self.srv.requests = []
+        self.srv.raw_posts = []
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.host = f"127.0.0.1:{self.srv.server_address[1]}"
         self.tmp = tempfile.TemporaryDirectory()
@@ -180,6 +183,9 @@ class PushTest(unittest.TestCase):
         self.assertTrue(ok, log)
         self.assertEqual(self.srv.requests[0][1], "/window?account=A%C3%A7%C3%A3o")
         self.assertEqual(self.srv.requests[1][2]["account"], "Ação")
+        # o firmware compara os bytes UTF-8 e não decodifica \uXXXX (jstr)
+        self.assertIn('"account": "Ação"'.encode("utf-8"), self.srv.raw_posts[0])
+        self.assertNotIn(b"\\u", self.srv.raw_posts[0])
 
     def test_sem_conta_vai_para_o_foco(self):
         ok, _ = self.push(None)
