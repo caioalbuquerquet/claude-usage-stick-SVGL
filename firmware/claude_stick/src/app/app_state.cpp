@@ -63,6 +63,7 @@ void leave_content(ContentId next) {
 void full_clean() {
     if (s_uiReset) s_uiReset(true);
     overlay_menu_close();
+    overlay_menu_gc();                  // senão o lv_obj_clean apaga o s_dead por baixo
     lv_obj_clean(lv_layer_top());
     shell_destroy();
     s_contentBuilt = false;

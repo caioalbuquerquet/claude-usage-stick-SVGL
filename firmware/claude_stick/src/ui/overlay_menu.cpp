@@ -146,8 +146,10 @@ void overlay_menu_open() {
     overlay_restack();   // momento e incidente continuam por cima
 }
 
+// Não chama o gc: pode rodar dentro do evento de uma linha do menu escondido
+// (row_cb -> intent_open), e o s_dead é o pai de quem está despachando o
+// evento. O s_dead só sai no overlay_menu_gc(), no loop().
 void overlay_menu_close() {
-    overlay_menu_gc();
     if (!s_scrim) return;
     lv_obj_delete(s_scrim);
     s_scrim = nullptr;

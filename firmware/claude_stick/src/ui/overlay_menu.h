@@ -7,9 +7,10 @@
 // Abre se fechado, fecha se aberto (botão "❯ menu" do shell).
 void overlay_menu_toggle();
 void overlay_menu_open();
-// Fecha já (chamar fora de um evento do próprio menu; o menu, nos seus
-// eventos, só esconde e deixa a remoção para overlay_menu_gc()).
+// Fecha o menu aberto já. Pode ser chamada de um evento do próprio menu (que
+// antes o esconde): o menu escondido só é apagado por overlay_menu_gc().
 void overlay_menu_close();
 bool overlay_menu_is_open();
-// Apaga o menu escondido por um evento dele. Chamar no loop() (app_state_tick).
+// Apaga o menu escondido por um evento dele. Chamar só no loop(), fora de
+// qualquer evento do LVGL (app_state_tick, e antes de limpar o lv_layer_top).
 void overlay_menu_gc();
