@@ -7,7 +7,7 @@
 // ============================================================
 
 // ── Firmware ─────────────────────────────────────────────
-#define FW_VERSION              "2.3"
+#define FW_VERSION              "3.0"
 
 // ── Display QSPI (AXS15231B) ─────────────────────────────
 #define TFT_CS    45
@@ -35,7 +35,7 @@
 #define DEFAULT_POLL_SEC        120
 #define MIN_POLL_SEC            30
 #define MAX_POLL_SEC            300
-#define STATUS_POLL_SEC         300      // status.claude.com a cada 5 min
+#define STATUS_POLL_SEC         300      // status.claude.com a cada 5 min (job STATUS do agendador)
 
 // ── Segurança (PIN + AES-256-GCM) ────────────────────────
 #define PIN_LEN                 4
@@ -45,7 +45,9 @@
 
 // ── Rede / API Claude ────────────────────────────────────
 #define WIFI_CONNECT_TIMEOUT_MS 8000
-#define API_TIMEOUT_MS          15000
+#define API_TIMEOUT_MS          8000     // leitura: espera máxima por dados (HTTPClient::setTimeout)
+#define NET_CONNECT_MS          5000     // conexão TCP (HTTPClient::setConnectTimeout)
+#define NET_HANDSHAKE_S         5        // handshake TLS, em SEGUNDOS (NetworkClientSecure::setHandshakeTimeout)
 #define MESSAGES_ENDPOINT       "https://api.anthropic.com/v1/messages"
 #define ANTHROPIC_VERSION       "2023-06-01"
 #define PROBE_MODEL             "claude-haiku-4-5-20251001"
@@ -55,6 +57,19 @@
 // NTP (necessário para os contadores de reset)
 #define NTP_SERVER_1            "pool.ntp.org"
 #define NTP_SERVER_2            "time.cloudflare.com"
+
+// ── Task de rede (net_task) ──────────────────────────────
+#define NET_TASK_STACK          14336    // bytes
+#define NET_TASK_CORE           0        // loop() roda no core 1
+// Requisição HTTPS sem terminar por mais que isto => lastReset="net_stuck" e
+// esp_restart(). Pior caso com timeouts respeitados ~39 s (DNS ~21 + 5 + 5 + 8).
+#define NET_REQ_STUCK_MS        90000
+
+// ── Agendador / modelo ──────────────────────────────────
+#define HIST_SAVE_MIN_SEC       300      // intervalo mínimo entre gravações do histórico
+#define DOT_FRESH_SEC           10       // ponto azul por até N s após o fim do ciclo
+#define AUTH_BACKOFF_MAX_SEC    1800     // teto da espera crescente após AUTH (30 min)
+#define NTP_GRACE_SEC           60       // sem relógio por mais que isto => NOCLOCK
 
 // ── NVS ──────────────────────────────────────────────────
 #define NVS_NAMESPACE           "claude"
