@@ -19,7 +19,8 @@ algum texto passar do espaço (largura do card do item 36; as barras contam os
 2 colchetes), o script lista os excessos e sai com erro, sem gravar nada.
 
 Saída: assets/mock-home-{1,2,3,4}.png, mock-menu.png, mock-modelos.png,
-mock-janela5h.png, mock-ritmo.png, mock-incidente.png, mock-momento.png.
+mock-janela5h.png, mock-ritmo.png, mock-incidente.png, mock-momento.png e
+mock-splash.png (abertura no meio da passada do brilho).
 
 Requisitos: Python 3 + Pillow; tools/gen_fonts.sh já rodado (cache das TTF).
 Uso: python3 tools/gen_mockups.py [--check]   (--check só confere, não grava)
@@ -641,6 +642,59 @@ def momento():
     return c
 
 
+# ---------------------------------------------------------------------------
+# Abertura (screen_splash.cpp): mesma conta inteira do firmware
+# ---------------------------------------------------------------------------
+SPLASH_MS, SHINE_HW, SHINE_K256, SHINE_PEAK = 4000, 71, 69, 217
+C_SHINE, C_SPLASH_DOT = "#e2f0ff", "#2fb5dd"
+
+
+def css_ease(t):
+    """cubic-bezier(.42, 0, .58, 1) com t em 0..1 (lv_cubic_bezier no firmware)."""
+    lo, hi = 0.0, 1.0
+    for _ in range(40):                       # acha u com x(u) = t
+        u = (lo + hi) / 2
+        x = 3 * u * (1 - u) ** 2 * 0.42 + 3 * u * u * (1 - u) * 0.58 + u ** 3
+        lo, hi = (u, hi) if x < t else (lo, u)
+    u = (lo + hi) / 2
+    return 3 * u * u * (1 - u) + u ** 3
+
+
+def splash(t_ms=SPLASH_MS // 2):
+    c = Canvas()
+    logo, bird = hermes.logo_splash(), hermes.bird_braille_56()
+    lw, lh = logo.size
+    top = (H - (56 + 18 + lh + 18 + 8)) // 2
+    c.image(bird, (W - 56) // 2, top)
+    # faixa de brilho misturada só nos pixels do logo
+    skew = SHINE_K256 * (lh - 1) // 256
+    c0, c1 = -SHINE_HW, lw - 1 + skew + SHINE_HW
+    cx = c0 + (c1 - c0) * css_ease(min(t_ms, SPLASH_MS) / SPLASH_MS)
+    sr, sg, sb, _ = rgb(C_SHINE)
+    px = logo.load()
+    for y in range(lh):
+        for x in range(lw):
+            r, g, b, a = px[x, y]
+            if not a:
+                continue
+            d = abs(x * 256 + SHINE_K256 * y - cx * 256)
+            if d < SHINE_HW * 256:
+                k = SHINE_PEAK * (SHINE_HW * 256 - d) / (SHINE_HW * 256) / 255
+                px[x, y] = (round(r + (sr - r) * k), round(g + (sg - g) * k),
+                            round(b + (sb - b) * k), a)
+    c.image(logo, (W - lw) // 2, top + 56 + 18)
+    # pontos: 25% -> 100% (40% do ciclo de 1,8 s) -> 25%, 0,3 s entre eles
+    y = top + 56 + 18 + lh + 18 + 1
+    for i in range(3):
+        t = t_ms - 300 * i
+        ph = (t % 1800) / 1800 if t >= 0 else 0
+        e = css_ease(ph / 0.4) if ph < 0.4 else 1 - css_ease((ph - 0.4) / 0.6)
+        opa = round(64 + (255 - 64) * e)
+        x = W // 2 - 19 + i * 16
+        c.d.ellipse((x, y, x + 5, y + 5), fill=rgb(C_SPLASH_DOT, opa))
+    return c
+
+
 def main():
     ap = argparse.ArgumentParser(description="mockups da v3 com as fontes do firmware")
     ap.add_argument("--check", action="store_true", help="só confere as larguras")
@@ -659,6 +713,7 @@ def main():
         "mock-ritmo.png": ritmo(),
         "mock-incidente.png": incidente(),
         "mock-momento.png": momento(),
+        "mock-splash.png": splash(),
     }
     if OVERFLOWS:
         print("ERRO: textos que não cabem no espaço do firmware:", file=sys.stderr)
