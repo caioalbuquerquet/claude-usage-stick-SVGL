@@ -10,6 +10,7 @@
 #include "model/accounts.h"
 #include "net/poller.h"
 #include "net/token_store.h"
+#include "hw/frame_stats.h"
 
 // ficam no .ino (regra das fases 0 a 2)
 extern int g_pollSec;
@@ -82,12 +83,19 @@ void end_cycle(const NetResult& r) {
     }
     Serial.printf("[CYC] #%u end %ums classes=%s over=%u\n", (unsigned)s_cycleNo,
                   (unsigned)dur, cls[0] ? cls : "-", (unsigned)s_cyclesOver);
-    Serial.printf("[HEAP] int_free=%u int_big=%u int_min=%u psram_free=%u net_hwm=%u\n",
+    // Tempo de quadro desde o último log (spike da fase 3, item 34), em ms
+    // com uma casa: frame = layout + render + flush; flush = rotação + envio.
+    FrameWindow fw = frame_window_take();
+    Serial.printf("[HEAP] int_free=%u int_big=%u int_min=%u psram_free=%u net_hwm=%u "
+                  "frame_max=%u.%ums flush_max=%u.%ums frames=%u disp=%s\n",
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-                  (unsigned)poller_stack_hwm());
+                  (unsigned)poller_stack_hwm(),
+                  (unsigned)(fw.frameMaxUs / 1000), (unsigned)(fw.frameMaxUs / 100 % 10),
+                  (unsigned)(fw.flushMaxUs / 1000), (unsigned)(fw.flushMaxUs / 100 % 10),
+                  (unsigned)fw.frames, frame_mode());
 
     moment_flush();
     s_nextCycleMs = millis() + interval_ms();

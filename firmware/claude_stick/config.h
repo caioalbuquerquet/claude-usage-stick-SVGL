@@ -71,6 +71,19 @@
 #define AUTH_BACKOFF_MAX_SEC    1800     // teto da espera crescente após AUTH (30 min)
 #define NTP_GRACE_SEC           60       // sem relógio por mais que isto => NOCLOCK
 
+// ── Display / shell (fase 3, item 34) ───────────────────
+// Pulso do ponto de status: 4 degraus de opacidade (100/70/40/70%), um a cada
+// DOT_PULSE_STEP_MS (ciclo de 1,6 s). Fallback do spike se o quadro passar de
+// 40 ms e o modo parcial não resolver: 1000 (1 troca por segundo).
+#define DOT_PULSE_STEP_MS       400
+// Spike: 0 = LV_DISPLAY_RENDER_MODE_FULL (padrão, buffer de tela cheia e envio
+// dos 480x320 a cada quadro); 1 = PARTIAL (buffer de 1/10 da tela e envio só
+// das linhas nativas tocadas). Para testar sem editar o arquivo:
+//   THEP_FLAGS=-DDISP_PARTIAL=1 ./build.sh upload-dev
+#ifndef DISP_PARTIAL
+#define DISP_PARTIAL            0
+#endif
+
 // ── NVS ──────────────────────────────────────────────────
 #define NVS_NAMESPACE           "claude"
 

@@ -9,6 +9,7 @@
 #   ./build.sh dev             # compila com -DTHEP_DEV (rotas e logs de diagnóstico)
 #   ./build.sh upload-dev [porta] # idem dev + grava
 #   ./build.sh monitor <porta> # abre o serial monitor (115200)
+#   THEP_FLAGS="-D..." ./build.sh ... # flags extras (ex.: -DDISP_PARTIAL=1)
 #
 # Pré-requisitos (ver firmware/REFERENCIA-HARDWARE-LVGL.md):
 #   - arduino-cli 1.4.x, core esp32:esp32 3.3.11
@@ -36,6 +37,8 @@ port="${2:-$PORT_DEFAULT}"
 case "$cmd" in
   dev|upload-dev) LVFLAGS="$LVFLAGS -DTHEP_DEV" ;;
 esac
+# Flags extras de teste, ex.: THEP_FLAGS=-DDISP_PARTIAL=1 ./build.sh upload-dev
+if [ -n "${THEP_FLAGS:-}" ]; then LVFLAGS="$LVFLAGS $THEP_FLAGS"; fi
 
 # compile [args extras do arduino-cli...]
 compile() {

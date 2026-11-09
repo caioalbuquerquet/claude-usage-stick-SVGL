@@ -39,6 +39,7 @@ void web_on_tok_stats(void (*cb)());
 
 #ifdef THEP_DEV
 // Métricas que só o dono do LVGL (loop/.ino) sabe ler, para o GET /health.
-struct WebHealthUi { int lvMemUsedPct; uint32_t frameMsMax; };
+// O tempo de quadro vem de hw/frame_stats.h.
+struct WebHealthUi { int lvMemUsedPct; };
 void web_on_health_ui(void (*cb)(WebHealthUi *out));
 #endif

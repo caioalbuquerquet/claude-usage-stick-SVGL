@@ -10,6 +10,7 @@
 #include <time.h>
 #include <esp_heap_caps.h>
 #include "hw/wifi_manager.h"
+#include "hw/frame_stats.h"
 #include "config.h"
 #include "net/api.h"
 #include "net/poller.h"
@@ -270,7 +271,7 @@ void web_on_health_ui(void (*cb)(WebHealthUi *)) { s_healthUi = cb; }
 
 // GET /health (só THEP_DEV): métricas do Technical Plan §9, sem token nem rótulo.
 static void handleHealth() {
-  WebHealthUi ui = {-1, 0};
+  WebHealthUi ui = {-1};
   if (s_healthUi) s_healthUi(&ui);
   char b[256];
   String j;
@@ -284,9 +285,10 @@ static void handleHealth() {
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            ui.lvMemUsedPct, (unsigned)poller_stack_hwm());
   j += b;
-  snprintf(b, sizeof(b), "\"last_cycle_ms\":%u,\"cycles_over_interval\":%u,\"frame_ms_max\":%u,\"slots\":[",
+  snprintf(b, sizeof(b), "\"last_cycle_ms\":%u,\"cycles_over_interval\":%u,\"frame_ms_max\":%u,"
+           "\"flush_ms_max\":%u,\"disp_mode\":\"%s\",\"slots\":[",
            (unsigned)scheduler_last_cycle_ms(), (unsigned)scheduler_cycles_over_interval(),
-           (unsigned)ui.frameMsMax);
+           (unsigned)frame_ms_max(), (unsigned)frame_flush_ms_max(), frame_mode());
   j += b;
   uint32_t now = (uint32_t)time(nullptr);
   bool first = true;

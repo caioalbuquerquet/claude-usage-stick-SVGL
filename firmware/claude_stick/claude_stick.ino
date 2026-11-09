@@ -39,6 +39,7 @@
 #include "net/scheduler.h"
 #include "net/token_store.h"
 #include "app/web_api.h"
+#include "hw/frame_stats.h"
 #include "ui/i18n.h"
 #include "ui/theme.h"         // fase 3: tema THEP (as telas ainda usam a paleta abaixo)
 #include <mbedtls/platform_util.h>
@@ -179,7 +180,41 @@ static void incident_sync();
 // ============================================================
 // Pipeline de display/touch (validado no bring-up)
 // ============================================================
+// Spike da fase 3 (item 34): o tempo de cada flush vai para hw/frame_stats.
+#if DISP_PARTIAL
+// Modo parcial: o LVGL entrega só as áreas invalidadas (buffer de 1/10 da
+// tela). Cada área é girada para o framebuffer do Canvas (que continua sendo a
+// imagem inteira da tela) e, na última área do quadro, só as linhas nativas
+// tocadas (retrato 320 de largura) vão ao AXS15231B. Uma linha nativa y é a
+// coluna de paisagem x = 479 - y, então o ponto do cabeçalho vira uma faixa
+// de ~10 linhas nativas inteiras.
+static Arduino_GFX *g_panel = nullptr;      // saída do Canvas (o AXS15231B)
+static int16_t g_bandY0 = SCREEN_WIDTH, g_bandY1 = -1;
 static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  uint32_t t0 = micros();
+  const int w = lv_area_get_width(area);
+  const uint16_t *src = (const uint16_t *)px_map;
+  for (int ly = area->y1; ly <= area->y2; ly++) {
+    const uint16_t *row = src + (ly - area->y1) * w;
+    for (int lx = area->x1; lx <= area->x2; lx++)
+      canvas_fb[(SCREEN_WIDTH - 1 - lx) * SCREEN_HEIGHT + ly] = row[lx - area->x1];
+  }
+  int16_t y0 = SCREEN_WIDTH - 1 - area->x2, y1 = SCREEN_WIDTH - 1 - area->x1;
+  if (y0 < g_bandY0) g_bandY0 = y0;
+  if (y1 > g_bandY1) g_bandY1 = y1;
+  if (lv_display_flush_is_last(disp) && g_bandY1 >= g_bandY0) {
+    g_panel->draw16bitRGBBitmap(0, g_bandY0, canvas_fb + g_bandY0 * SCREEN_HEIGHT,
+                                SCREEN_HEIGHT, g_bandY1 - g_bandY0 + 1);
+    g_bandY0 = SCREEN_WIDTH; g_bandY1 = -1;
+  }
+  frame_flush_add(micros() - t0);
+  lv_display_flush_ready(disp);
+}
+#else
+// Modo FULL (validado no bring-up): a tela inteira é girada e enviada.
+static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+  (void)area;
+  uint32_t t0 = micros();
   uint16_t *src = (uint16_t *)px_map;
   for (int ly = 0; ly < SCREEN_HEIGHT; ly++) {
     uint16_t *src_row = src + ly * SCREEN_WIDTH;
@@ -187,7 +222,14 @@ static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
       canvas_fb[(479 - lx) * 320 + ly] = src_row[lx];
   }
   gfx->flush();
-  lv_disp_flush_ready(disp);
+  frame_flush_add(micros() - t0);
+  lv_display_flush_ready(disp);
+}
+#endif
+// Tempo de quadro (layout + render + flush), medido pelos eventos de refresh.
+static void frame_evt_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) == LV_EVENT_REFR_START) frame_refr_start();
+  else frame_refr_end();
 }
 static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
   uint16_t x, y;
@@ -202,21 +244,12 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 }
 
 #ifdef THEP_DEV
-// GET /health (item 6, só THEP_DEV): tempo de quadro medido pelos eventos de
-// refresh do display (a passada inteira, inclusive o flush) e uso do pool do
-// LVGL, lidos aqui porque o loop() é o dono do LVGL.
-static uint32_t g_frameStartMs = 0, g_frameMsMax = 0;
-static void frame_evt_cb(lv_event_t *e) {
-  if (lv_event_get_code(e) == LV_EVENT_REFR_START) { g_frameStartMs = millis(); return; }
-  if (!g_frameStartMs) return;
-  uint32_t d = millis() - g_frameStartMs;
-  if (d > g_frameMsMax) g_frameMsMax = d;
-}
+// GET /health (item 6, só THEP_DEV): uso do pool do LVGL, lido aqui porque o
+// loop() é o dono do LVGL. O tempo de quadro vem de hw/frame_stats.
 static void health_ui_cb(WebHealthUi *o) {
   lv_mem_monitor_t m;
   lv_mem_monitor(&m);
   o->lvMemUsedPct = m.used_pct;
-  o->frameMsMax = g_frameMsMax;
 }
 #endif
 
@@ -2394,16 +2427,26 @@ void setup() {
   lv_init();
   theme_init();   // só inicializa os estilos; nenhuma tela usa ainda
   lv_tick_set_cb([]() -> uint32_t { return millis(); });
+#if DISP_PARTIAL
+  g_panel = g;
+  uint32_t bufSize = SCREEN_WIDTH * (SCREEN_HEIGHT / 10) * sizeof(lv_color_t);
+  const lv_display_render_mode_t renderMode = LV_DISPLAY_RENDER_MODE_PARTIAL;
+  frame_set_mode("partial");
+#else
   uint32_t bufSize = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color_t);
+  const lv_display_render_mode_t renderMode = LV_DISPLAY_RENDER_MODE_FULL;
+  frame_set_mode("full");
+#endif
   lv_color_t *buf = (lv_color_t *)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) { Serial.println("FATAL PSRAM"); while (1) delay(1000); }
   if (!acct_init()) { Serial.println("FATAL PSRAM (acct)"); while (1) delay(1000); }
   lv_display_t *disp = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   lv_display_set_flush_cb(disp, disp_flush_cb);
-  lv_display_set_buffers(disp, buf, NULL, bufSize, LV_DISPLAY_RENDER_MODE_FULL);
-#ifdef THEP_DEV
+  lv_display_set_buffers(disp, buf, NULL, bufSize, renderMode);
   lv_display_add_event_cb(disp, frame_evt_cb, LV_EVENT_REFR_START, NULL);
   lv_display_add_event_cb(disp, frame_evt_cb, LV_EVENT_REFR_READY, NULL);
+  Serial.printf("[BOOT] display %s, buffer %u bytes\n", frame_mode(), (unsigned)bufSize);
+#ifdef THEP_DEV
   web_on_health_ui(health_ui_cb);
   Serial.println("[BOOT] build THEP_DEV: GET /health ativo");
 #endif
