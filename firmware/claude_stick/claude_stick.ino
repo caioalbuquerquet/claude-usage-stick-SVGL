@@ -43,6 +43,7 @@
 #include "app/app_state.h"
 #include "ui/shell.h"
 #include "ui/overlay_menu.h"
+#include "ui/screens.h"
 #include "hw/frame_stats.h"
 #include "ui/i18n.h"
 #include "ui/theme.h"         // fase 3: tema THEP (shell e menu; as telas ainda usam a paleta abaixo)
@@ -124,10 +125,6 @@ static lv_point_precise_t g_mXPts[NMODELS][4][2];   // olhos em X (mood 3)
 // ---- Ponteiros dos conteúdos do shell (zerados a cada troca de conteúdo) ----
 #define NSEG 18                       // segmentos do medidor do momento
 struct DashUI {
-  // agora: uma coluna por slot salvo (fase 2, item 24)
-  struct Col { lv_obj_t *card, *name, *pct, *bar, *l5, *l7, *st; int slot; } col[ACCT_MAX];
-  int colN;
-  lv_obj_t *agTok;
   // modelos
   lv_obj_t *mChip[NMODELS];
   // tendência da janela 5h (linhas custom)
@@ -149,7 +146,6 @@ static void ui_wifi(lv_obj_t *scr);
 static void ui_token(lv_obj_t *scr);
 static void trend_redraw();
 static void heat_redraw();
-static void update_tok_row();
 static void show_moment(int slot, int win, int thr);
 static void moment_tick();
 static void moment_close();
@@ -294,14 +290,6 @@ static void fmt_hm(uint32_t epoch, char *out, int sz) {
   time_t t = (time_t)epoch; struct tm tmv;
   localtime_r(&t, &tmv);
   strftime(out, sz, "%H:%M", &tmv);
-}
-// 1234 -> "1.2k", 2345678 -> "2.3M"
-static void fmt_tok(long long v, char *out, int sz) {
-  if (v >= 100000000LL)     snprintf(out, sz, "%lldM", v / 1000000LL);
-  else if (v >= 1000000LL)  snprintf(out, sz, "%.1fM", v / 1e6);
-  else if (v >= 10000LL)    snprintf(out, sz, "%lldk", v / 1000LL);
-  else if (v >= 1000LL)     snprintf(out, sz, "%.1fk", v / 1e3);
-  else                      snprintf(out, sz, "%lld", v);
 }
 
 // ============================================================
@@ -708,7 +696,10 @@ static lv_obj_t *g_tokMsg = nullptr;            // status na tela do device
 static void web_token_msg_cb(const char *m) {
   if (g_tokMsg) lv_label_set_text(g_tokMsg, m);
 }
-static void web_tok_stats_cb() { update_tok_row(); }
+// Tokens do bridge: a linha fica no layout de 1 conta de /agora.
+static void web_tok_stats_cb() {
+  if (app_state() == ST_SHELL && app_content() == ContentId::HOME) screen_home_refresh();
+}
 
 static void anim_opa_cb(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
 
@@ -1005,75 +996,6 @@ static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
 // Conteúdos do shell com o visual da v2.3 (fase 3, onda 2). Cada um monta
 // dentro do painel (438 x 214); o novo visual vem com src/ui/screen_*.
 // ============================================================
-// /agora (fase 2, item 24): uma coluna por slot salvo (1 a 4 colunas
-// iguais) com a % da 5h, os resets, a semana e a linha de estado/projeção.
-// O screen_home da fase 3 substitui esta tela.
-// Fontes por número de colunas (tabela do item 24).
-static const lv_font_t *col_pct_font(int n) {
-  return n <= 1 ? &lv_font_montserrat_48 : n == 2 ? &lv_font_montserrat_40
-       : n == 3 ? &lv_font_montserrat_28 : &lv_font_montserrat_24;
-}
-static const lv_font_t *col_txt_font(int n) {
-  return n <= 2 ? &lv_font_montserrat_14 : &lv_font_montserrat_12;
-}
-// Tocar no card de uma conta muda o foco (Technical Plan §3).
-static void col_click_cb(lv_event_t *e) {
-  intent_focus((int)(intptr_t)lv_event_get_user_data(e));
-}
-static lv_obj_t *col_label(lv_obj_t *p, const lv_font_t *f, uint32_t c, lv_label_long_mode_t mode) {
-  lv_obj_t *l = lv_label_create(p);
-  lv_obj_set_style_text_font(l, f, 0);
-  lv_obj_set_style_text_color(l, lv_color_hex(c), 0);
-  lv_obj_set_width(l, lv_pct(100));
-  lv_label_set_long_mode(l, mode);
-  lv_label_set_text(l, "");
-  return l;
-}
-static void build_tile_agora(lv_obj_t *t) {
-  int n = 0;
-  for (int s = 0; s < ACCT_MAX; s++) if (g_accts.used[s]) n++;
-  if (n == 0) return;
-  const int GAP = 8, X0 = 0, W = SHELL_CONTENT_W, H = 196;
-  int w = (W - GAP * (n - 1)) / n;
-  const lv_font_t *fp = col_pct_font(n), *ft = col_txt_font(n);
-  g_ui.colN = 0;
-  for (int s = 0; s < ACCT_MAX; s++) {
-    if (!g_accts.used[s]) continue;
-    int i = g_ui.colN++;
-    auto &c = g_ui.col[i];
-    c.slot = s;
-    c.card = card(t, X0 + i * (w + GAP), 0, w, H);
-    lv_obj_set_style_pad_all(c.card, n >= 3 ? 8 : 12, 0);
-    lv_obj_set_flex_flow(c.card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(c.card, n >= 3 ? 3 : 5, 0);
-    bool focus = (s == g_accts.active);
-    if (focus && n > 1) {
-      lv_obj_set_style_border_width(c.card, 2, 0);
-      lv_obj_set_style_border_color(c.card, lv_color_hex(C_ACCENT), 0);
-    }
-    lv_obj_add_flag(c.card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(c.card, col_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)s);
-
-    c.name = col_label(c.card, ft, focus ? C_ACCENT : C_MUTED, LV_LABEL_LONG_DOT);
-    if (g_accts.label[s][0]) lv_label_set_text(c.name, g_accts.label[s]);
-    else lv_label_set_text_fmt(c.name, TRS("conta %d", "account %d"), s + 1);
-    c.pct = col_label(c.card, fp, C_TEXT, LV_LABEL_LONG_CLIP);
-    c.bar = lv_bar_create(c.card);
-    lv_obj_set_size(c.bar, lv_pct(100), 6);
-    lv_bar_set_range(c.bar, 0, 100);
-    lv_obj_set_style_bg_color(c.bar, lv_color_hex(C_TRACK), LV_PART_MAIN);
-    lv_obj_set_style_radius(c.bar, 3, LV_PART_MAIN);
-    lv_obj_set_style_radius(c.bar, 3, LV_PART_INDICATOR);
-    lv_obj_clear_flag(c.bar, LV_OBJ_FLAG_CLICKABLE);
-    c.l5 = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_DOT);
-    c.l7 = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_DOT);
-    c.st = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_WRAP);
-  }
-  // tokens da sessão da conta em foco (bridge), no rodapé
-  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 0, 200);
-  lv_obj_set_width(g_ui.agTok, SHELL_CONTENT_W);
-  lv_obj_set_style_text_align(g_ui.agTok, LV_TEXT_ALIGN_RIGHT, 0);
-}
 // /modelos: Clawd oficial por modelo (humor animado) + sonda real.
 // Incidentes nao aparecem aqui: viram o dialog sobre o shell.
 static const int MODEL_CX[NMODELS] = {54, 164, 274, 384};   // centros no painel de 438 px
@@ -1211,128 +1133,6 @@ static void build_tile_heat(lv_obj_t *t) {
 // ============================================================
 // Atualização de valores
 // ============================================================
-// Os valores de /agora são reescritos a cada segundo: só invalidam o objeto
-// quando o texto ou a cor mudam (no modo FULL cada invalidação custa um
-// quadro inteiro; ver hw/frame_stats.h).
-static void lbl_set(lv_obj_t *l, const char *t) {
-  if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
-}
-static void lbl_color(lv_obj_t *l, lv_color_t c) {
-  if (!lv_color_eq(lv_obj_get_style_text_color(l, LV_PART_MAIN), c))
-    lv_obj_set_style_text_color(l, c, 0);
-}
-
-static void update_tok_row() {
-  if (!g_ui.agTok) return;
-  const TokenStats &tok = acct[g_accts.active].tok;
-  if (tok.atMs == 0 || millis() - tok.atMs > TOK_FRESH_MS) {
-    lbl_set(g_ui.agTok, "");
-    return;
-  }
-  char a[16], b[16], s[96];
-  fmt_tok(tok.tin, a, sizeof(a));
-  fmt_tok(tok.tout, b, sizeof(b));
-  snprintf(s, sizeof(s), TRS("tokens na janela: %s entrada \xE2\x80\xA2 %s saida",
-                             "window tokens: %s in \xE2\x80\xA2 %s out"), a, b);
-  lbl_set(g_ui.agTok, s);
-}
-
-// Projeção curta da coluna (ASCII: as Montserrat de hoje não têm ✓ ✗ ·; o
-// projection_text() da src/logic entra com a fonte da fase 3).
-static void col_proj_text(const AccountState &a, bool narrow, char *out, size_t sz, uint32_t *col) {
-  time_t now = time(nullptr);
-  uint32_t we = a.usage.h5ResetEpoch;
-  *col = C_MUTED;
-  if (now < 1000000000L || we == 0) { strlcpy(out, "--", sz); return; }
-  int n, head;
-  const Sample *hist = hist_data(a, &n, &head);
-  ProjResult pr = projection(hist, n, head, a.usage.h5, we, (uint32_t)now);
-  if (pr.st == ProjResult::SEM_DADOS) {
-    strlcpy(out, narrow ? TRS("Coletando...", "Collecting...")
-                        : TRS("Coletando dados...", "Collecting data..."), sz);
-  } else if (pr.st == ProjResult::ESGOTADA) {
-    strlcpy(out, TRS("Esgotada", "Exhausted"), sz);
-    *col = C_BAD;
-  } else if (pr.st == ProjResult::ESGOTA) {
-    char hm[12]; fmt_hm(pr.etaEpoch, hm, sizeof(hm));
-    if (narrow) snprintf(out, sz, TRS("Esgota %s", "Out %s"), hm);
-    else snprintf(out, sz, TRS("Esgota as %s (em %dh%02dm)", "Runs out %s (in %dh%02dm)"),
-                  hm, pr.minutes / 60, pr.minutes % 60);
-    *col = pr.minutes < 60 ? C_BAD : C_WARN;
-  } else if (pr.rate > 0.02f) {
-    snprintf(out, sz, TRS("Nao esgota (~%d%%)", "Won't run out (~%d%%)"), pr.pctAtReset);
-    *col = C_OK;
-  } else {
-    strlcpy(out, TRS("Uso estavel", "Stable usage"), sz);
-    *col = C_OK;
-  }
-}
-
-// Valores de uma coluna, com o texto do card na precedência do Technical
-// Plan §4: SEM CHAVE; falha sem dado ("! CLASSE", --%); falha com dado
-// ("! CLASSE • idade", últimos valores); pendente ("consultando...", --%);
-// senão a projeção. O esmaecimento da falha com dado entra na fase 3.
-static void col_update(int i) {
-  auto &c = g_ui.col[i];
-  if (!c.card) return;
-  const AccountState &a = acct[c.slot];
-  bool narrow = g_ui.colN >= 3;
-  char st[64], b[48], e[24];
-  uint32_t stCol = C_MUTED;
-  bool showData = true;
-  FetchClass k = a.lastClass;
-  bool failed = (k != FC_NONE && k != FC_OK);
-  if (!a.keyOk) {
-    strlcpy(st, TRS("SEM CHAVE", "NO KEY"), sizeof(st));
-    stCol = C_BAD; showData = false;
-  } else if (failed && a.usageAtEpoch == 0) {
-    snprintf(st, sizeof(st), LV_SYMBOL_WARNING " %s", fetch_class_name(k));
-    stCol = C_BAD; showData = false;
-  } else if (failed) {
-    uint32_t now = (uint32_t)time(nullptr);
-    char age[12];
-    age_text(now > a.usageAtEpoch ? now - a.usageAtEpoch : 0, age, sizeof(age));
-    snprintf(st, sizeof(st), LV_SYMBOL_WARNING " %s \xE2\x80\xA2 %s", fetch_class_name(k), age);
-    stCol = C_BAD;
-  } else if (k == FC_NONE) {
-    strlcpy(st, TRS("consultando...", "querying..."), sizeof(st));
-    showData = false;
-  } else {
-    col_proj_text(a, narrow, st, sizeof(st), &stCol);
-  }
-  lbl_set(c.st, st);
-  lbl_color(c.st, lv_color_hex(stCol));
-
-  const UsageData &u = a.usage;
-  if (!showData) {
-    lbl_set(c.pct, "--%");
-    lbl_color(c.pct, lv_color_hex(C_FAINT));
-    lv_bar_set_value(c.bar, 0, LV_ANIM_OFF);
-    lbl_set(c.l5, narrow ? "5h --" : TRS("5h: --", "5h: --"));
-    lbl_set(c.l7, narrow ? "7d --" : TRS("semana: --", "week: --"));
-    return;
-  }
-  snprintf(b, sizeof(b), "%d%%", (int)(u.h5 + 0.5f));
-  lbl_set(c.pct, b);
-  lv_color_t gc = grad_color(u.h5);
-  lbl_color(c.pct, gc);
-  lv_bar_set_value(c.bar, (int32_t)(u.h5 + 0.5f), LV_ANIM_OFF);
-  if (!lv_color_eq(lv_obj_get_style_bg_color(c.bar, LV_PART_INDICATOR), gc))
-    lv_obj_set_style_bg_color(c.bar, gc, LV_PART_INDICATOR);
-  fmt_eta(u.h5ResetEpoch, e, sizeof(e));
-  snprintf(b, sizeof(b), narrow ? "5h %s" : TRS("5h: reseta em %s", "5h: resets in %s"), e);
-  lbl_set(c.l5, b);
-  fmt_eta(u.d7ResetEpoch, e, sizeof(e));
-  snprintf(b, sizeof(b), narrow ? "7d %d%% \xE2\x80\xA2 %s" : TRS("semana: %d%% \xE2\x80\xA2 %s", "week: %d%% \xE2\x80\xA2 %s"),
-           (int)(u.d7 + 0.5f), e);
-  lbl_set(c.l7, b);
-}
-
-// Contadores, idades e projeções (1s) — separado da chegada de resultados.
-static void home_cols_update() {
-  for (int i = 0; i < g_ui.colN; i++) col_update(i);
-}
-
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
 static void trend_redraw() {
   if (!g_ui.trHist) return;
@@ -1671,7 +1471,7 @@ static uint8_t affected_mask() {
 //
 // A versao so entra com ate 2 modelos: com 3, "Haiku 4.5 \u2022 Sonnet 4.5 \u2022 Opus 4.6"
 // passa dos 262 px da coluna e o LONG_DOT cortaria justamente o ultimo nome.
-static bool affected_models(char *out, size_t sz) {
+bool affected_models(char *out, size_t sz) {
   static const char *NAMES[4] = {"Haiku", "Sonnet", "Opus", "Fable"};
   uint8_t mask = affected_mask();
   out[0] = 0;
@@ -1697,7 +1497,7 @@ static bool affected_models(char *out, size_t sz) {
 // Palavra do "impact" do Statuspage. Todo incidente alerta: quando nao ha
 // gravidade utilizavel o chip diz isso na cara, em vez de sumir e deixar o
 // modal parecendo generico.
-static const char *severity_label(uint8_t sev) {
+const char *severity_label(uint8_t sev) {
   switch (sev) {
     case SEV_CRITICAL: return TRS("CRITICO", "CRITICAL");
     case SEV_MAJOR:    return TRS("GRAVE", "MAJOR");
@@ -1812,28 +1612,16 @@ static void incident_sync() {
 }
 
 // ---- Montagem e atualização de cada conteúdo (registrados no setup()) ----
-// Título de /agora: "THEP Usage v3.0 · N contas" (mockup-home.dc.html).
+// /agora: src/ui/screen_home.cpp (item 36). O incidente e o momento guardado
+// continuam aqui até os overlays saírem do .ino (item 40).
 static void home_build(lv_obj_t *p) {
-  char t[48], n[24];
-  int na = accountCount(g_accts);
-  if (na == 1) strlcpy(n, tr(T::FOOT_ACCT_ONE), sizeof(n));
-  else snprintf(n, sizeof(n), tr(T::FOOT_ACCT_FMT), na);
-  snprintf(t, sizeof(t), "THEP Usage v" FW_VERSION " \xC2\xB7 %s", n);
-  shell_set_title(t);
-  build_tile_agora(p);
-  home_cols_update();
-  update_tok_row();
+  screen_home_build(p);
   incident_sync();
   moment_flush();                             // momento guardado durante outra tela
 }
 static void home_refresh() {
-  home_cols_update();
-  update_tok_row();
+  screen_home_refresh();
   incident_sync();
-}
-static void home_tick() {
-  home_cols_update();
-  update_tok_row();
 }
 
 static void models_chips_update() {
@@ -2220,6 +2008,7 @@ static void ui_about(lv_obj_t *scr) {
 // ============================================================
 static void ui_reset(bool full) {
   memset(&g_ui, 0, sizeof(g_ui));
+  screen_home_reset();
   g_mascN = 0;
   g_pinDots = g_pinMsg = nullptr;
   g_tokMsg = nullptr;
@@ -2259,7 +2048,7 @@ static void register_ui() {
   app_register_screen(ST_WIFI,      {screen_wifi_build, nullptr});
   app_register_screen(ST_TOKEN,     {screen_token_build, nullptr});
 
-  app_register_content(ContentId::HOME,         {home_build, home_refresh, home_tick});
+  app_register_content(ContentId::HOME,         {home_build, home_refresh, screen_home_tick});
   app_register_content(ContentId::MODELS,       {models_build, models_refresh, nullptr});
   app_register_content(ContentId::TREND,        {trend_build, trend_redraw, nullptr});
   app_register_content(ContentId::HEAT,         {heat_build, heat_redraw, nullptr});

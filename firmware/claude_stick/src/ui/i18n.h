@@ -44,6 +44,14 @@ constexpr Txt CARD_RESET_S   = {"reset", "reset"};     // layouts 3 e 4, sem ':'
 constexpr Txt CARD_WEEK      = {"semana:", "week:"};
 constexpr Txt CARD_WEEK_S    = {"semana", "week"};     // layout 3, sem ':'
 constexpr Txt CARD_WEEK_XS   = {"sem", "wk"};          // layout 4
+// Layout de 1 conta: títulos de seção, marca sob o pássaro e tokens do bridge.
+constexpr Txt CARD_SEC_5H    = {"Janela 5h", "5h window"};
+constexpr Txt CARD_SEC_WEEK  = {"Semana", "Week"};
+constexpr Txt CARD_STATUS    = {"status: ", "status: "};
+// %s = entrada, %s = saída (fmt_tok: "1.2k", "3.4M").
+constexpr Txt CARD_TOK_FMT   = {"tokens: %s entrada · %s saída", "tokens: %s in · %s out"};
+// Rótulo de um slot sem nome (%d = slot + 1).
+constexpr Txt ACCT_DEFAULT_FMT = {"conta %d", "account %d"};
 
 // ---- Shell ----
 constexpr Txt WAITING_NET    = {"aguardando a rede…", "waiting for the network…"};
