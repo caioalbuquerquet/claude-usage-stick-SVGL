@@ -10,7 +10,7 @@
  *
  * Tokens por sessao: a API nao expoe contagem para conta de assinatura; um
  * bridge opcional (tools/token_bridge.py) soma os transcripts locais do
- * Claude Code e faz POST /tokens neste device (mDNS claude-stick.local).
+ * Claude Code e faz POST /tokens neste device (mDNS caio-thep-usage-monitor.local, DEVICE_HOST).
  *
  * Sem botao fisico: navegacao 100% touch. Depois do desbloqueio a tela e o
  * shell fixo (src/ui/shell) e o menu (src/ui/overlay_menu) troca o conteudo.

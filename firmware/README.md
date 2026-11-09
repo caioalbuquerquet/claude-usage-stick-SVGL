@@ -49,7 +49,7 @@ AUTH) e `[HEAP]` (heap, stack da task e tempos de quadro: `frame_max`, `flush_ma
 | Pasta | Arquivos | O que faz |
 |---|---|---|
 | `app/` | `app_state` | Estado da aplicação (PIN, onboarding, shell), troca de conteúdo do painel adiada para o `loop()` e as intenções das telas (`intent_open`, `intent_focus`, `intent_refresh`) |
-| | `web_api` | Servidor HTTP local: formulário do token (`POST /token` → job `VALIDATE`, `GET /token/status`), `GET /window[?account=]`, `POST /tokens`, `GET /info` e `GET /health` (`THEP_DEV`); mDNS `claude-stick.local` |
+| | `web_api` | Servidor HTTP local: formulário do token (`POST /token` → job `VALIDATE`, `GET /token/status`), `GET /window[?account=]`, `POST /tokens`, `GET /info` e `GET /health` (`THEP_DEV`); mDNS `caio-thep-usage-monitor.local` |
 | `hw/` | `touch.h`, `wifi_manager.h` | Driver de toque AXS15231B e redes salvas na NVS (até 3; `connectList` sem NVS para a task) |
 | | `lv_pool` | Pool do LVGL (`LV_MEM_SIZE`, 96 KB) alocado na PSRAM pelo `lv_conf.h` |
 | | `frame_stats` | Tempo de quadro e do flush (rotação e envio, linhas enviadas) para o `[HEAP]` e o `/health` |

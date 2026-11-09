@@ -32,7 +32,7 @@ void screen_about_build(lv_obj_t* p) {
   lv_image_set_src(bird, &img_bird_braille_124);
   lv_obj_align(bird, LV_ALIGN_TOP_RIGHT, 0, 0);
 
-  ui_label(p, fb, C_TITLE, 0, 62, "THEP Usage Stick");
+  ui_label(p, fb, C_TITLE, 0, 62, DEVICE_NAME);
   lv_obj_t* d = mklabel(p, TRS("Medidor de uso do Claude Code em tempo real: janelas "
                                "de 5h e semanal, direto da API da Anthropic.",
                                "Real-time Claude Code usage meter: 5-hour and weekly "
