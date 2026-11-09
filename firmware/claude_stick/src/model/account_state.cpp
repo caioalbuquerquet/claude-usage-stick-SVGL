@@ -60,9 +60,3 @@ ThrHit check_thresholds(AccountState& a) {
   return best;
 }
 
-// ---- Globais temporárias da conta ativa (fase 0), removidas no item 14 ----
-UsageData  g_usage = {};
-TokenStats g_tok = {0, 0, 0, 0, 0};
-uint8_t g_thrFired[2] = {0, 0};
-float g_thrPrev[2] = {-1, -1};
-bool g_thrBase = false;

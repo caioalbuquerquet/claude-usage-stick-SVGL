@@ -1,9 +1,13 @@
 #pragma once
 // Servidor HTTP local (onboarding do token, /window, /tokens).
-// Fase 0: movido de claude_stick.ino sem mudança de comportamento.
+// Fase 0: movido de claude_stick.ino. Fase 1: lê/grava acct[g_accts.active].
+#include "net/api.h"
 
 // Setado por POST /token quando a API aceita o token; o loop() consome.
 extern volatile bool g_tokenGot;
+// UsageData do token validado por POST /token. finalize_pending_token() (.ino)
+// copia para acct[g_tokenTargetSlot].usage. Sai na fase 2 (fluxo assíncrono).
+extern UsageData g_validatedUsage;
 
 void stop_web();
 void ensure_mdns();

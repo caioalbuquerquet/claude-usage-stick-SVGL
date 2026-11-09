@@ -73,9 +73,3 @@ struct ThrHit { int8_t win; uint8_t thr; };
 // mesma consulta, vale o maior limiar; em empate, a de 5h.
 ThrHit check_thresholds(AccountState& a);
 
-// ---- Globais temporárias da conta ativa (fase 0), removidas no item 14 ----
-extern UsageData g_usage;
-extern TokenStats g_tok;
-extern uint8_t g_thrFired[2];
-extern float g_thrPrev[2];
-extern bool g_thrBase;

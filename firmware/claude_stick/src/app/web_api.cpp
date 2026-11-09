@@ -1,7 +1,7 @@
 // Servidor HTTP local: onboarding do token (/, POST /token) e dados para o
-// bridge de tokens (/, /window, POST /tokens). Movido de claude_stick.ino sem
-// mudança de comportamento (v3, fase 0). Não chama lv_*: o que mexe na tela ou
-// no estado do PIN passa pelos callbacks registrados pelo .ino.
+// bridge de tokens (/, /window, POST /tokens). Não chama lv_*: o que mexe na
+// tela ou no estado do PIN passa pelos callbacks registrados pelo .ino.
+// Fase 1: lê e grava acct[g_accts.active] (a conta em foco).
 #include "app/web_api.h"
 #include <Arduino.h>
 #include <WiFi.h>
@@ -28,6 +28,7 @@ static void token_msg(const char *m) { if (s_onTokenMsg) s_onTokenMsg(m); }
 
 static WebServer *g_web = nullptr;
 volatile bool g_tokenGot = false;
+UsageData g_validatedUsage = {};
 
 void stop_web() { if (g_web) { g_web->stop(); delete g_web; g_web = nullptr; } }
 
@@ -115,7 +116,7 @@ static void handleTokenPost() {
   bool ok = fetchUsage(t.c_str(), tmp);
   if (ok) {
     strlcpy(g_pendingToken, t.c_str(), sizeof(g_pendingToken));
-    g_usage = tmp;                              // já temos dados p/ o dashboard
+    g_validatedUsage = tmp;                     // .ino copia p/ acct[slot] ao salvar
     if (s_onTokenOk) s_onTokenOk();             // .ino zera o estado do PIN
     g_tokenGot = true;                          // loop -> ST_SETUP_PIN
     token_msg(TRS("token OK! defina o PIN", "token OK! set the PIN"));
@@ -144,34 +145,36 @@ static bool jstr(const String &s, const char *key, char *out, size_t sz) {
   return true;
 }
 static void handleWindow() {
+  const UsageData &u = acct[g_accts.active].usage;
   char b[256];
   snprintf(b, sizeof(b),
            "{\"now\":%lu,\"h5_reset\":%lu,\"d7_reset\":%lu,\"h5_util\":%.4f,\"d7_util\":%.4f,"
            "\"account\":\"%s\",\"slot\":%d}",
            (unsigned long)time(nullptr),
-           (unsigned long)g_usage.h5ResetEpoch, (unsigned long)g_usage.d7ResetEpoch,
-           g_usage.h5 / 100.0f, g_usage.d7 / 100.0f,
+           (unsigned long)u.h5ResetEpoch, (unsigned long)u.d7ResetEpoch,
+           u.h5 / 100.0f, u.d7 / 100.0f,
            g_accts.label[g_accts.active], g_accts.active);
   g_web->send(200, "application/json", b);
 }
 static void handleTokensPost() {
   String body = g_web->arg("plain");
-  char acct[ACCT_LBL_MAX];
-  if (jstr(body, "account", acct, sizeof(acct)) && acct[0] &&
-      strcmp(acct, g_accts.label[g_accts.active]) != 0) {
+  char lbl[ACCT_LBL_MAX];
+  if (jstr(body, "account", lbl, sizeof(lbl)) && lbl[0] &&
+      strcmp(lbl, g_accts.label[g_accts.active]) != 0) {
     char r[96];
     snprintf(r, sizeof(r), "{\"error\":\"account_mismatch\",\"active\":\"%s\"}",
              g_accts.label[g_accts.active]);
     g_web->send(409, "application/json", r);
     return;
   }
-  g_tok.tin      = jll(body, "in");
-  g_tok.tout     = jll(body, "out");
-  g_tok.cache    = jll(body, "cache");
-  g_tok.sessions = (int)jll(body, "sessions");
-  g_tok.atMs     = millis();
+  TokenStats &tok = acct[g_accts.active].tok;
+  tok.tin      = jll(body, "in");
+  tok.tout     = jll(body, "out");
+  tok.cache    = jll(body, "cache");
+  tok.sessions = (int)jll(body, "sessions");
+  tok.atMs     = millis();
   Serial.printf("[TOK] in=%lld out=%lld cache=%lld sess=%d\n",
-                g_tok.tin, g_tok.tout, g_tok.cache, g_tok.sessions);
+                tok.tin, tok.tout, tok.cache, tok.sessions);
   g_web->send(200, "application/json", "{\"ok\":true}");
   if (s_onTokStats) s_onTokStats();
 }

@@ -88,10 +88,11 @@ static ModelInfo g_models[NMODELS] = {
 };
 static int g_probeIdx = 0;
 
-// ---- Uso, tokens por sessao e limiares da conta ativa: src/model/account_state.{h,cpp} ----
+// ---- Uso, tokens por sessao, limiares e historico por conta: acct[] (src/model/account_state.h).
+// Fase 1: a tela mostra so a conta em foco, acct[g_accts.active]. ----
 
 // ---- Token / segurança ----
-AccountSlots g_accts;               // lida por history.cpp e web_api.cpp
+AccountSlots g_accts;               // lida por web_api.cpp
 static EncryptedBlob g_blob;
 static bool g_hasToken = false;              // existe conta salva no NVS
 static bool g_onboarding = false;            // primeiro setup em andamento
@@ -340,8 +341,7 @@ static void factory_reset() {
   memset(g_sessionPin, 0, sizeof(g_sessionPin));
   g_pendingLabel[0] = 0;
   g_tokenTargetSlot = 0;
-  reset_history_ram();
-  memset(&g_tok, 0, sizeof(g_tok));
+  for (int i = 0; i < ACCT_MAX; i++) acct_clear(i);
   g_hasToken = false;
   g_token[0] = 0; g_pendingToken[0] = 0;
   g_pinAttempts = 0;
@@ -434,6 +434,7 @@ static void pin_submit() {
     }
     accountSave(g_prefs, g_accts, g_tokenTargetSlot, g_blob, g_pendingLabel);
     accountSetActive(g_prefs, g_accts, g_tokenTargetSlot);
+    acct[g_tokenTargetSlot].usage = g_validatedUsage;   // v2.3: POST /token ja gravava g_usage
     g_pendingLabel[0] = 0;
     strlcpy(g_sessionPin, g_pinEntry, sizeof(g_sessionPin));
     strlcpy(g_token, g_pendingToken, sizeof(g_token));
@@ -596,7 +597,7 @@ static void ui_wifi() {
     lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
                          &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
     lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -150, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(g_usage.ok ? ST_MAIN : ST_SETTINGS));
+    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
   }
 
   wifi_status = mklabel(scr, "...", &lv_font_montserrat_14, C_MUTED);
@@ -661,7 +662,7 @@ static void ui_token() {
     lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
                          &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
     lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(g_usage.ok ? ST_MAIN : ST_SETTINGS));
+    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
   }
 
   lv_obj_t *mark = build_claude_mark(scr);
@@ -710,8 +711,9 @@ static void ui_message(const char *title, const char *sub, uint32_t color) {
 // Tela de falha do primeiro load. Toque em qualquer lugar tenta de novo — e o
 // loop() ainda re-tenta sozinho a cada 15s (falha de rede/NTP costuma passar).
 static void ui_error() {
+  const UsageData &u = acct[g_accts.active].usage;
   ui_message(TRS("Falha", "Failed"),
-             g_usage.error[0] ? g_usage.error : TRS("sem dados", "no data"), C_BAD);
+             u.error[0] ? u.error : TRS("sem dados", "no data"), C_BAD);
   lv_obj_t *scr = lv_screen_active();
   lv_obj_t *h = mklabel(scr, TRS("toque para tentar de novo", "tap to retry"),
                         &lv_font_montserrat_14, C_MUTED);
@@ -748,15 +750,16 @@ static bool switch_account(int slot) {
   char tok[200];
   if (!decryptToken(b, g_sessionPin, tok, sizeof(tok))) return false;
 
-  save_history();
+  hist_save(g_accts.active, acct[g_accts.active]);
   accountSetActive(g_prefs, g_accts, slot);
   g_blob = b;
   strlcpy(g_token, tok, sizeof(g_token));
   memset(tok, 0, sizeof(tok));
-  reset_history_ram();
-  load_history();
-  memset(&g_tok, 0, sizeof(g_tok));
-  memset(&g_usage, 0, sizeof(g_usage));
+  AccountState &a = acct[slot];
+  hist_reset_ram(a);
+  hist_load(slot, a);
+  memset(&a.tok, 0, sizeof(a.tok));
+  memset(&a.usage, 0, sizeof(a.usage));
   Serial.printf("[ACCT] conta ativa -> slot %d (%s)\n", slot, g_accts.label[slot]);
   request_state(ST_LOADING);
   return true;
@@ -771,15 +774,16 @@ static void finalize_pending_token() {
   }
   bool replacing = g_accts.used[g_tokenTargetSlot];
   bool switching = (g_tokenTargetSlot != g_accts.active);
-  if (switching) save_history();
+  if (switching) hist_save(g_accts.active, acct[g_accts.active]);
   const char *lbl = g_pendingLabel[0] ? g_pendingLabel
                     : (replacing ? g_accts.label[g_tokenTargetSlot] : "");
   accountSave(g_prefs, g_accts, g_tokenTargetSlot, nb, lbl);
+  AccountState &a = acct[g_tokenTargetSlot];
   if (switching) {
     accountSetActive(g_prefs, g_accts, g_tokenTargetSlot);
-    reset_history_ram();
-    load_history();
-    memset(&g_tok, 0, sizeof(g_tok));
+    hist_reset_ram(a);
+    hist_load(g_tokenTargetSlot, a);
+    memset(&a.tok, 0, sizeof(a.tok));
   }
   g_blob = nb;
   strlcpy(g_token, g_pendingToken, sizeof(g_token));
@@ -788,7 +792,11 @@ static void finalize_pending_token() {
   g_hasToken = true;
   g_lastOkMs = g_lastPollMs = millis();
   g_lastFetchOk = true;
-  hist_push(g_usage.h5, g_usage.d7); accumulate_heat(g_usage.h5); save_history();
+  a.usage = g_validatedUsage;                 // validado por POST /token
+  uint32_t now = (uint32_t)time(nullptr);
+  hist_push(a, a.usage.h5, a.usage.d7, now);
+  accumulate_heat(a, a.usage.h5, now, g_tzOffset * 3600);
+  hist_save(g_tokenTargetSlot, a);
   Serial.printf("[ACCT] token salvo no slot %d (%s)\n",
                 g_tokenTargetSlot, g_accts.label[g_tokenTargetSlot]);
   request_state(ST_MAIN);
@@ -1162,13 +1170,14 @@ static void on_tile_changed(lv_event_t *e) {
 // ============================================================
 static void update_tok_row() {
   if (!g_ui.agTok) return;
-  if (g_tok.atMs == 0 || millis() - g_tok.atMs > TOK_FRESH_MS) {
+  const TokenStats &tok = acct[g_accts.active].tok;
+  if (tok.atMs == 0 || millis() - tok.atMs > TOK_FRESH_MS) {
     lv_label_set_text(g_ui.agTok, "");
     return;
   }
   char a[16], b[16], s[96];
-  fmt_tok(g_tok.tin, a, sizeof(a));
-  fmt_tok(g_tok.tout, b, sizeof(b));
+  fmt_tok(tok.tin, a, sizeof(a));
+  fmt_tok(tok.tout, b, sizeof(b));
   snprintf(s, sizeof(s), TRS("tokens na janela: %s entrada \xE2\x80\xA2 %s saida",
                              "window tokens: %s in \xE2\x80\xA2 %s out"), a, b);
   lv_label_set_text(g_ui.agTok, s);
@@ -1177,16 +1186,17 @@ static void update_tok_row() {
 // Contadores/relógios (1s) — separado dos valores de fetch.
 static void dash_tick() {
   if (g_state != ST_MAIN || !g_ui.agCd5) return;
+  const UsageData &u = acct[g_accts.active].usage;
   char e[32], c[24], b[64];
-  fmt_eta(g_usage.h5ResetEpoch, e, sizeof(e));
+  fmt_eta(u.h5ResetEpoch, e, sizeof(e));
   lv_label_set_text(g_ui.agCd5, e);
-  fmt_clock(g_usage.h5ResetEpoch, c, sizeof(c));
+  fmt_clock(u.h5ResetEpoch, c, sizeof(c));
   snprintf(b, sizeof(b), TRS("RESETA EM \xE2\x80\xA2 %s", "RESETS \xE2\x80\xA2 %s"), c);
   lv_label_set_text(g_ui.agAt5, b);
 
-  fmt_eta(g_usage.d7ResetEpoch, e, sizeof(e));
+  fmt_eta(u.d7ResetEpoch, e, sizeof(e));
   lv_label_set_text(g_ui.agCd7, e);
-  fmt_clock(g_usage.d7ResetEpoch, c, sizeof(c));
+  fmt_clock(u.d7ResetEpoch, c, sizeof(c));
   snprintf(b, sizeof(b), TRS("RESETA EM \xE2\x80\xA2 %s", "RESETS \xE2\x80\xA2 %s"), c);
   lv_label_set_text(g_ui.agAt7, b);
 
@@ -1204,8 +1214,11 @@ static void set_ag_proj(const char *txt, uint32_t color) {
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
 static void trend_redraw() {
   if (!g_ui.trHist) return;
+  const AccountState &a = acct[g_accts.active];
+  int histN, histHead;
+  const Sample *hist = hist_data(a, &histN, &histHead);
   time_t now = time(nullptr);
-  uint32_t we = g_usage.h5ResetEpoch;
+  uint32_t we = a.usage.h5ResetEpoch;
   bool clockOk = (now > 1000000000L) && we != 0;
 
   if (!clockOk) {
@@ -1227,8 +1240,8 @@ static void trend_redraw() {
 
   // pontos do histórico dentro da janela
   int n = 0;
-  for (int i = 0; i < g_histN && n < HIST_MAX; i++) {
-    Sample s = g_hist[hist_idx(i)];
+  for (int i = 0; i < histN && n < HIST_MAX; i++) {
+    Sample s = hist[(histHead - histN + i + HIST_MAX * 2) % HIST_MAX];
     if (s.t == 0 || s.t < ws || s.t > (uint32_t)now) continue;
     g_trPts[n].x = tr_x(s.t, ws, we);
     g_trPts[n].y = tr_y(s.h5);
@@ -1238,12 +1251,12 @@ static void trend_redraw() {
   uint32_t nowClamped = ((uint32_t)now > we) ? we : (uint32_t)now;
   if (n < HIST_MAX) {
     g_trPts[n].x = tr_x(nowClamped, ws, we);
-    g_trPts[n].y = tr_y(g_usage.h5);
+    g_trPts[n].y = tr_y(a.usage.h5);
     n++;
   }
   lv_line_set_points(g_ui.trHist, g_trPts, n);
 
-  int cx = tr_x(nowClamped, ws, we), cy = tr_y(g_usage.h5);
+  int cx = tr_x(nowClamped, ws, we), cy = tr_y(a.usage.h5);
   lv_obj_set_pos(g_ui.trDot, cx - 4, cy - 4);
   lv_obj_clear_flag(g_ui.trDot, LV_OBJ_FLAG_HIDDEN);
 
@@ -1260,19 +1273,19 @@ static void trend_redraw() {
   float rate = 0;                    // %/min
   {
     Sample first = {0, 0, 0};
-    for (int i = 0; i < g_histN; i++) {
-      Sample s = g_hist[hist_idx(i)];
+    for (int i = 0; i < histN; i++) {
+      Sample s = hist[(histHead - histN + i + HIST_MAX * 2) % HIST_MAX];
       if (s.t == 0 || s.t < ws) continue;
       if (s.t >= (uint32_t)now - 2700) { first = s; break; }
     }
     if (first.t != 0 && (uint32_t)now > first.t + 300) {
       float dt = ((uint32_t)now - first.t) / 60.0f;
-      rate = (g_usage.h5 - first.h5) / dt;
+      rate = (a.usage.h5 - first.h5) / dt;
     }
   }
 
   char e[32];
-  if (g_usage.h5 >= 99.5f) {
+  if (a.usage.h5 >= 99.5f) {
     lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
     fmt_eta(we, e, sizeof(e));
     snprintf(b, sizeof(b), TRS("Janela esgotada \xE2\x80\xA2 reseta em %s",
@@ -1283,7 +1296,7 @@ static void trend_redraw() {
                                "Exhausted \xE2\x80\xA2 resets in %s"), e);
     set_ag_proj(b, C_BAD);
   } else if (rate > 0.02f) {
-    float minsLeft = (100.0f - g_usage.h5) / rate;
+    float minsLeft = (100.0f - a.usage.h5) / rate;
     uint32_t etaT = (uint32_t)now + (uint32_t)(minsLeft * 60);
     g_trProjPts[0].x = cx; g_trProjPts[0].y = cy;
     if (etaT <= we) {
@@ -1299,7 +1312,7 @@ static void trend_redraw() {
                hm, (int)minsLeft / 60, (int)minsLeft % 60);
       set_ag_proj(b, minsLeft < 60 ? C_BAD : C_WARN);
     } else {
-      float endPct = g_usage.h5 + rate * ((we - (uint32_t)now) / 60.0f);
+      float endPct = a.usage.h5 + rate * ((we - (uint32_t)now) / 60.0f);
       g_trProjPts[1].x = tr_x(we, ws, we);
       g_trProjPts[1].y = tr_y(endPct);
       snprintf(b, sizeof(b), TRS("No ritmo atual, NAO esgota antes do reset (~%d%%)",
@@ -1325,7 +1338,7 @@ static void trend_redraw() {
 static void heat_redraw() {
   if (!g_ui.heat[0]) return;
   float data[24];
-  heat_mode_data(g_heatMode, data);
+  heat_mode_data(acct[g_accts.active], g_heatMode, (uint32_t)time(nullptr), g_tzOffset * 3600, data);
   float mx = 1.0f;
   for (int h = 0; h < 24; h++) if (data[h] > mx) mx = data[h];
   int curHour = -1; time_t now = time(nullptr);
@@ -1358,25 +1371,6 @@ static MomentUI g_mo = {};
 static uint32_t g_momentUntil = 0;
 static int g_pendWin = -1, g_pendThr = 0;      // momento aguardando exibição
 static lv_point_precise_t g_moXPts[4][2];      // olhos em X (KO)
-
-// Detecta cruzamento de limiar após cada fetch. Baseline no 1º fetch (não
-// dispara pelo que já estava acima); zera quando a janela reseta (queda >15pp).
-static void check_thresholds() {
-  float c[2] = {g_usage.h5, g_usage.d7};
-  for (int w = 0; w < 2; w++) {
-    if (!g_thrBase || (g_thrPrev[w] - c[w]) > 15.0f) {
-      g_thrFired[w] = 0;
-      for (int i = 0; i < 4; i++) if (c[w] >= THR[i]) g_thrFired[w] |= 1 << i;
-    } else {
-      int hit = -1;
-      for (int i = 0; i < 4; i++)
-        if (c[w] >= THR[i] && !(g_thrFired[w] & (1 << i))) { g_thrFired[w] |= 1 << i; hit = i; }
-      if (hit >= 0) { g_pendWin = w; g_pendThr = THR[hit]; }
-    }
-    g_thrPrev[w] = c[w];
-  }
-  g_thrBase = true;
-}
 
 static void moment_close() {
   if (!g_mo.scrim) return;
@@ -1488,7 +1482,8 @@ static void show_moment(int win, int thr) {
     g_mo.seg[i] = rrect(s, 240 + i * 11, 196, 8, 16, 2, C_TRACK);
 
   char e[32], b[48];
-  fmt_eta(win == 0 ? g_usage.h5ResetEpoch : g_usage.d7ResetEpoch, e, sizeof(e));
+  const UsageData &u = acct[g_accts.active].usage;
+  fmt_eta(win == 0 ? u.h5ResetEpoch : u.d7ResetEpoch, e, sizeof(e));
   snprintf(b, sizeof(b), TRS("reseta em %s", "resets in %s"), e);
   lv_obj_t *eta = mklabel(s, b, &lv_font_montserrat_14, C_FAINT);
   lv_obj_set_pos(eta, 240, 228);
@@ -1701,17 +1696,18 @@ static void incident_sync() {
 // Preenche todos os valores vindos do fetch (sem rebuild de tela).
 static void refresh_ui_values() {
   if (g_state != ST_MAIN || !g_ui.agPct5) return;
+  const UsageData &u = acct[g_accts.active].usage;
   char b[96];
 
   // Agora: percentuais + medidores segmentados (cor desliza verde -> vermelho)
-  snprintf(b, sizeof(b), "%d%%", (int)(g_usage.h5 + 0.5f)); lv_label_set_text(g_ui.agPct5, b);
-  lv_obj_set_style_text_color(g_ui.agPct5, grad_color(g_usage.h5), 0);
-  set_meter(g_ui.seg5, g_usage.h5);
-  snprintf(b, sizeof(b), "%d%%", (int)(g_usage.d7 + 0.5f)); lv_label_set_text(g_ui.agPct7, b);
-  lv_obj_set_style_text_color(g_ui.agPct7, grad_color(g_usage.d7), 0);
-  set_meter(g_ui.seg7, g_usage.d7);
+  snprintf(b, sizeof(b), "%d%%", (int)(u.h5 + 0.5f)); lv_label_set_text(g_ui.agPct5, b);
+  lv_obj_set_style_text_color(g_ui.agPct5, grad_color(u.h5), 0);
+  set_meter(g_ui.seg5, u.h5);
+  snprintf(b, sizeof(b), "%d%%", (int)(u.d7 + 0.5f)); lv_label_set_text(g_ui.agPct7, b);
+  lv_obj_set_style_text_color(g_ui.agPct7, grad_color(u.d7), 0);
+  set_meter(g_ui.seg7, u.d7);
 
-  set_chip(g_ui.agChip, overall_label(g_usage.statusOverall), status_color(g_usage.statusOverall));
+  set_chip(g_ui.agChip, overall_label(u.statusOverall), status_color(u.statusOverall));
   update_tok_row();
 
   // Modelos: chips de sonda
@@ -1980,7 +1976,7 @@ static void ui_settings() {
   lv_obj_set_size(bk, 100, 32);
   lv_obj_set_ext_click_area(bk, 6);
   lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(g_usage.ok ? ST_MAIN : ST_SETTINGS));
+  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(acct[g_accts.active].usage.ok ? ST_MAIN : ST_SETTINGS));
 
   // lista rolável
   lv_obj_t *lst = lv_obj_create(scr);
@@ -2049,8 +2045,9 @@ static void acct_del_cb(lv_event_t *e) {
   g_acctDelArmed = -1;
   bool wasActive = (slot == g_accts.active);
   accountRemove(g_prefs, g_accts, slot);
-  char pth[16]; snprintf(pth, sizeof(pth), "/hist%d.bin", slot);
+  char pth[16]; hist_path(slot, pth, sizeof(pth));
   LittleFS.remove(pth);
+  acct_clear(slot);
   if (wasActive) {
     EncryptedBlob b; char tok[200];
     if (accountLoadBlob(g_prefs, g_accts.active, b) &&
@@ -2058,10 +2055,11 @@ static void acct_del_cb(lv_event_t *e) {
       g_blob = b;
       strlcpy(g_token, tok, sizeof(g_token));
       memset(tok, 0, sizeof(tok));
-      reset_history_ram();
-      load_history();
-      memset(&g_tok, 0, sizeof(g_tok));
-      memset(&g_usage, 0, sizeof(g_usage));
+      AccountState &a = acct[g_accts.active];
+      hist_reset_ram(a);
+      hist_load(g_accts.active, a);
+      memset(&a.tok, 0, sizeof(a.tok));
+      memset(&a.usage, 0, sizeof(a.usage));
       request_state(ST_LOADING);
       return;
     }
@@ -2350,11 +2348,17 @@ static void probe_next_model() {
 // Primeiro load (mostra a tela de carregamento). Vai p/ ST_MAIN ou ST_ERROR.
 static void do_refresh() {
   wait_for_time(10000);
-  bool ok = fetchUsage(g_token, g_usage);
+  int slot = g_accts.active;
+  AccountState &a = acct[slot];
+  bool ok = fetchUsage(g_token, a.usage);
   if (ok) {
     fetchModelStatus(g_status); g_lastOkMs = millis(); g_lastFetchOk = true;
-    hist_push(g_usage.h5, g_usage.d7); accumulate_heat(g_usage.h5); save_history();
-    check_thresholds();
+    uint32_t now = (uint32_t)time(nullptr);
+    hist_push(a, a.usage.h5, a.usage.d7, now);
+    accumulate_heat(a, a.usage.h5, now, g_tzOffset * 3600);
+    hist_save(slot, a);
+    ThrHit h = check_thresholds(a);
+    if (h.win >= 0) { g_pendWin = h.win; g_pendThr = h.thr; }
     probe_next_model();
   } else g_lastFetchOk = false;
   g_lastPollMs = millis();
@@ -2372,9 +2376,15 @@ static void bg_refresh() {
   bool ok = fetchUsage(g_token, u);
   bool rebuild = false;
   if (ok) {
-    g_usage = u; g_lastOkMs = millis(); g_lastFetchOk = true;
-    hist_push(u.h5, u.d7); accumulate_heat(u.h5); save_history();
-    check_thresholds();
+    int slot = g_accts.active;
+    AccountState &a = acct[slot];
+    a.usage = u; g_lastOkMs = millis(); g_lastFetchOk = true;
+    uint32_t now = (uint32_t)time(nullptr);
+    hist_push(a, u.h5, u.d7, now);
+    accumulate_heat(a, u.h5, now, g_tzOffset * 3600);
+    hist_save(slot, a);
+    ThrHit h = check_thresholds(a);
+    if (h.win >= 0) { g_pendWin = h.win; g_pendThr = h.thr; }
     int moodBefore[NMODELS];
     for (int i = 0; i < NMODELS; i++) moodBefore[i] = model_mood(i);
     fetchModelStatus(g_status);
@@ -2428,7 +2438,7 @@ void setup() {
   if (!LittleFS.begin(true)) Serial.println("LittleFS: falhou");
   else {
     hist_migrate_legacy();
-    load_history();
+    hist_load(g_accts.active, acct[g_accts.active]);
   }
 
   web_on_token_msg(web_token_msg_cb);

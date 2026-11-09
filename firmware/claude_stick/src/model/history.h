@@ -1,33 +1,27 @@
 #pragma once
 // Histórico (ring buffer), heatmap por hora/dia e persistência em LittleFS.
-// Fase 0: o estado continua em globais (extern abaixo) da conta ativa; na fase 1
-// passa para o AccountState, com assinaturas por conta.
+// Fase 1: o estado fica no AccountState de cada conta (model/account_state.h);
+// as funções recebem a conta e, quando gravam/leem arquivo, o slot.
 #include <stdint.h>
 #include <stddef.h>
 #include "logic/sample.h"          // HIST_MAX, Sample
-#include "model/account_state.h"   // NDAYS, DayHeat
+#include "model/account_state.h"   // AccountState, NDAYS, DayHeat
 
-// ---- Histórico (ring buffer; persistido em LittleFS) ----
-extern Sample g_hist[HIST_MAX];
-extern int g_histN;
-extern int g_histHead;
-extern float g_hourBurn[24];   // consumo por hora do dia (todo o tempo)
-extern float g_lastH5;         // última utilização 5h (delta do heatmap)
+// Grava uma amostra (t = 0 se o relógio não estiver sincronizado).
+void hist_push(AccountState& a, float h5, float d7, uint32_t now);
+// Heatmap: atribui o consumo (Δ utilização 5h) à hora do dia local.
+void accumulate_heat(AccountState& a, float h5, uint32_t now, int32_t tzOffsetSec);
+// Soma o heatmap conforme o período (0=hoje 1=7d 2=30d 3=tudo).
+void heat_mode_data(const AccountState& a, int mode, uint32_t now, int32_t tzOffsetSec,
+                    float out[24]);
+// Ring buffer cru: amostra i (0 = mais antiga) em (head - n + i + 2*HIST_MAX) % HIST_MAX.
+const Sample* hist_data(const AccountState& a, int* n, int* head);
 
-// ---- Heatmap por dia (para o filtro hoje/7d/30d) ----
-extern DayHeat g_days[NDAYS];
-extern int g_dayN;
+void hist_path(int slot, char* out, size_t sz);
+void hist_reset_ram(AccountState& a);
+void hist_save(int slot, const AccountState& a);
+void hist_load(int slot, AccountState& a);
 
-void hist_push(float h5, float d7);
-int hist_idx(int i);
-uint32_t day_key();
-int day_slot(uint32_t dk);
-void accumulate_heat(float h5);
-void heat_mode_data(int mode, float out[24]);
-void hist_path(char *out, size_t sz);
-void reset_history_ram();
-void save_history();
-void load_history();
 bool copy_file(const char *from, const char *to);
 // Migração /hist.bin -> /hist0.bin (multi-conta). Chamar com o LittleFS montado.
 void hist_migrate_legacy();
