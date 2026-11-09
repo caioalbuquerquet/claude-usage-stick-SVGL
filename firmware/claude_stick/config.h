@@ -79,8 +79,12 @@
 // com degraus de 400 ms; o PARTIAL de então (faixa exata de linhas nativas,
 // CASET 0..319 + RASET) desenhou deslocado na horizontal: na paisagem isso é
 // linha nativa errada, ou seja, o AXS15231B em QSPI não respeita a janela de
-// LINHAS (RASET). Fica FULL com 1 troca por segundo.
-#define DOT_PULSE_STEP_MS       1000
+// LINHAS (RASET).
+// Resultado final na placa (2026-11-09): DISP_BANDS=1 + DISP_ROT_FAST=1 desenha
+// limpo e deu frame_max=44-46 ms (pior quadro, com rows_max=459 da troca do
+// relógio do rodapé), rot_max<1 ms, send_max=37 ms. Um degrau do pulso só envia
+// ~112 linhas, então o pulso volta ao ciclo de 1,6 s aprovado.
+#define DOT_PULSE_STEP_MS       400
 // Pipeline do display (spike, item 34). Padrão: FULL, rotação pixel a pixel.
 // Para testar sem editar o arquivo:
 //   THEP_FLAGS="-DDISP_ROT_FAST=1" ./build.sh upload-dev
@@ -99,10 +103,10 @@
 #error "DISP_PARTIAL saiu: use DISP_BANDS=1 (ou DISP_BANDS=2 para repetir o envio com RASET)"
 #endif
 #ifndef DISP_ROT_FAST
-#define DISP_ROT_FAST           0
+#define DISP_ROT_FAST           1
 #endif
 #ifndef DISP_BANDS
-#define DISP_BANDS              0
+#define DISP_BANDS              1
 #endif
 
 // ── NVS ──────────────────────────────────────────────────
