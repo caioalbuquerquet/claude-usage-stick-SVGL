@@ -269,7 +269,7 @@ void shell_set_footer(int nAccounts, int nFailed, int pollSec) {
     if (nAccounts == 1) snprintf(b, sizeof(b), "%s", tr(T::FOOT_ACCT_ONE));
     else snprintf(b, sizeof(b), tr(T::FOOT_ACCT_FMT), nAccounts);
     if (nFailed > 0) {
-        char k[16];
+        char k[24];
         snprintf(k, sizeof(k), " \xC2\xB7 %d \xE2\x9C\x97", nFailed);   // " · K ✗"
         strlcat(b, k, sizeof(b));
     }

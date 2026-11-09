@@ -75,7 +75,8 @@ bool app_state_pending();
 // Ao abrir WIFI pausa o agendador; ao sair, retoma.
 void shell_show(ContentId c);
 ContentId app_content();
-// Comando do menu de cada conteúdo ("/agora"…), também o título padrão.
+// Comando do menu de cada conteúdo ("/agora"…); as subtelas devolvem o
+// comando de onde se chega a elas (ABOUT -> "/ajustes").
 const char* content_command(ContentId c);
 
 // ---- Intenções ----

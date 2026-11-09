@@ -38,9 +38,16 @@ bool s_contentBuilt = false;    // há um conteúdo montado no shell
 
 uint32_t s_lastSecMs = 0;
 
+// Comando do menu de cada conteúdo (subtelas: o comando de onde se chega).
 const char* const COMMANDS[NCONTENT] = {
     "/agora", "/modelos", "/janela", "/ritmo", "/contas",
     "/contas", "/ajustes", "/ajustes", "/contas", "/ajustes",
+};
+// Título padrão do painel (o build do conteúdo pode trocar).
+const char* const TITLES[NCONTENT] = {
+    "/agora", "/modelos", "/janela", "/ritmo", "/contas",
+    "/contas \xC2\xB7 nome", "/ajustes", "/ajustes \xC2\xB7 sobre",
+    "/contas \xC2\xB7 token", "/ajustes \xC2\xB7 wifi",
 };
 
 const ContentOps& ops_of(ContentId c) { return s_contents[(int)c]; }
@@ -81,7 +88,7 @@ void apply_content() {
         if (next == ContentId::TOKEN) web_token_begin();
         if (next == ContentId::WIFI) scheduler_pause();
     }
-    shell_set_title(content_command(next));
+    shell_set_title(TITLES[(int)next]);
     const ContentOps& o = ops_of(next);
     if (o.build) o.build(parent);
 }
