@@ -382,7 +382,8 @@ void card_update(Card& c, uint32_t now) {
   lbl_color(c.pct, c5);
   if (c.key5) {
     const lv_font_t* fn = theme_font_num(LAYOUT_4);
-    lv_obj_set_x(c.key5, S.cardW - text_w(t, fn) - s_key5W);
+    int x = S.cardW - text_w(t, fn) - s_key5W;
+    if (lv_obj_get_x(c.key5) != x) lv_obj_set_x(c.key5, x);
   }
   bar_set(c.bar5, show ? u.h5 : 0.0f, S.bar5Cells, c5);
 
@@ -448,7 +449,7 @@ void card_update(Card& c, uint32_t now) {
     if (tok.atMs == 0 || millis() - tok.atMs > TOK_FRESH_MS) {
       lbl_set(c.tok, "");
     } else {
-      char in[16], out[16];
+      char in[24], out[24];
       fmt_tok(tok.tin, in, sizeof(in));
       fmt_tok(tok.tout, out, sizeof(out));
       snprintf(t, sizeof(t), tr(T::CARD_TOK_FMT), in, out);
