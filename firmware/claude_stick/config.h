@@ -75,11 +75,15 @@
 // Pulso do ponto de status: 4 degraus de opacidade (100/70/40/70%), um a cada
 // DOT_PULSE_STEP_MS (ciclo de 1,6 s). Fallback do spike se o quadro passar de
 // 40 ms e o modo parcial não resolver: 1000 (1 troca por segundo).
-#define DOT_PULSE_STEP_MS       400
+// Spike medido na placa (2026-11-09): FULL deu frame_max=109 ms / flush_max=65 ms
+// com degraus de 400 ms; PARTIAL desenha deslocado na horizontal (o AXS15231B
+// não respeita a janela de coluna). Fica FULL com 1 troca por segundo.
+#define DOT_PULSE_STEP_MS       1000
 // Spike: 0 = LV_DISPLAY_RENDER_MODE_FULL (padrão, buffer de tela cheia e envio
 // dos 480x320 a cada quadro); 1 = PARTIAL (buffer de 1/10 da tela e envio só
 // das linhas nativas tocadas). Para testar sem editar o arquivo:
 //   THEP_FLAGS=-DDISP_PARTIAL=1 ./build.sh upload-dev
+// Não usar PARTIAL neste painel: a gravação parcial sai deslocada (ver acima).
 #ifndef DISP_PARTIAL
 #define DISP_PARTIAL            0
 #endif
