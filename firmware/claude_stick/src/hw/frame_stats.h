@@ -18,12 +18,19 @@ void frame_refr_start();
 void frame_refr_end();
 // Duração de uma chamada do flush (rotação + envio), em microssegundos.
 void frame_flush_add(uint32_t us);
+// Partes do flush, somadas no quadro: rotação para o framebuffer nativo e
+// envio ao painel (com o número de linhas nativas enviadas, de 0 a 480).
+void frame_rotate_add(uint32_t us);
+void frame_send_add(uint32_t us, uint32_t rows);
 
 // Janela desde a última leitura; zera a janela.
 struct FrameWindow {
     uint32_t frames;      // quadros com flush
     uint32_t frameMaxUs;  // REFR_START -> REFR_READY (layout + render + flush)
     uint32_t flushMaxUs;  // soma das chamadas do flush num quadro
+    uint32_t rotateMaxUs; // soma das rotações num quadro
+    uint32_t sendMaxUs;   // soma dos envios num quadro
+    uint32_t rowsMax;     // linhas nativas enviadas num quadro
 };
 FrameWindow frame_window_take();
 

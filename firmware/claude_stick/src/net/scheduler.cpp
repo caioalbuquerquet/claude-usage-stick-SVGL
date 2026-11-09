@@ -84,10 +84,13 @@ void end_cycle(const NetResult& r) {
     Serial.printf("[CYC] #%u end %ums classes=%s over=%u\n", (unsigned)s_cycleNo,
                   (unsigned)dur, cls[0] ? cls : "-", (unsigned)s_cyclesOver);
     // Tempo de quadro desde o último log (spike da fase 3, item 34), em ms
-    // com uma casa: frame = layout + render + flush; flush = rotação + envio.
+    // com uma casa: frame = layout + render + flush; flush = rotação + envio
+    // (rot_max e send_max, cada um o maior do seu, não somam flush_max);
+    // rows_max = linhas nativas enviadas no maior quadro (480 = tela cheia).
     FrameWindow fw = frame_window_take();
     Serial.printf("[HEAP] int_free=%u int_big=%u int_min=%u psram_free=%u net_hwm=%u "
-                  "frame_max=%u.%ums flush_max=%u.%ums frames=%u disp=%s\n",
+                  "frame_max=%u.%ums flush_max=%u.%ums rot_max=%u.%ums send_max=%u.%ums "
+                  "rows_max=%u frames=%u disp=%s\n",
                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                   (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
@@ -95,6 +98,9 @@ void end_cycle(const NetResult& r) {
                   (unsigned)poller_stack_hwm(),
                   (unsigned)(fw.frameMaxUs / 1000), (unsigned)(fw.frameMaxUs / 100 % 10),
                   (unsigned)(fw.flushMaxUs / 1000), (unsigned)(fw.flushMaxUs / 100 % 10),
+                  (unsigned)(fw.rotateMaxUs / 1000), (unsigned)(fw.rotateMaxUs / 100 % 10),
+                  (unsigned)(fw.sendMaxUs / 1000), (unsigned)(fw.sendMaxUs / 100 % 10),
+                  (unsigned)fw.rowsMax,
                   (unsigned)fw.frames, frame_mode());
 
     moment_flush();
