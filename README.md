@@ -689,6 +689,7 @@ firmware/
   REFERENCIA-HARDWARE-LVGL.md   # display/colors/touch that work
 tools/
   token_bridge.py               # pushes local token counts to the device
+  test_token_bridge.py          # bridge tests (python3 tools/test_token_bridge.py)
   gen_fonts.sh                  # JetBrains Mono -> src/ui/fonts/*.c
   gen_hermes_assets.py          # THEP logo + braille bird -> src/ui/assets_thep.{h,c}
   gen_mockups.py                # regenerates assets/mock-*.png (the screens)
