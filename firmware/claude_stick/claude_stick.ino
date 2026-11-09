@@ -119,7 +119,7 @@ static const uint8_t BRI_LEVELS[3] = {60, 160, 255};
 static int g_briIdx = 1;
 
 static uint32_t g_lastPollMs = 0;         // millis do último poll (p/ barra de refresh)
-static int g_pollSec = DEFAULT_POLL_SEC;  // intervalo de atualização (config, NVS)
+int g_pollSec = DEFAULT_POLL_SEC;         // intervalo de atualização (config, NVS); lido pelo agendador
 int g_tzOffset = -3;                      // fuso GMT (horas), config NVS
 static int g_slideSec = 0;                // slideshow: 0=off, 5/10/15/30s (config, NVS)
 static int g_heatMode = 3;                // 0=hoje 1=7d 2=30d 3=tudo (config, NVS)

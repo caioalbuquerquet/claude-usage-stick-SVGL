@@ -114,6 +114,7 @@ void hist_save(int slot, AccountState& a) {
   memcpy(hf.days, a.days, sizeof(a.days));
   f.write((uint8_t *)&hf, sizeof(hf));
   f.close();
+  Serial.printf("[HIST] slot %d gravado (%d amostras)\n", slot, a.histN);
 }
 void hist_load(int slot, AccountState& a) {
   char pth[16]; hist_path(slot, pth, sizeof(pth));

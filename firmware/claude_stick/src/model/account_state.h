@@ -75,6 +75,20 @@ void acct_reset_runtime(int slot);
 // ---- Limiares ----
 extern const uint8_t THR[4];
 struct ThrHit { int8_t win; uint8_t thr; };
+
+// Aplica um resultado USAGE (tabela do item 18). Devolve falso, sem mexer em
+// nada, se não é USAGE, se é FC_DISCARDED, se o slot é inválido ou se o gen
+// não bate (resultado atrasado de conta removida ou token trocado).
+//   FC_OK:    usage, usageAtEpoch, fails/backoff = 0, hist_push,
+//             accumulate_heat, hist_save se hist_save_due, check_thresholds
+//             (o cruzamento vai em *hit; {-1, 0} se nenhum);
+//   FC_AUTH:  fails++, backoffCycles = auth_backoff_cycles(fails, intervalo);
+//   outras:   fails = backoffCycles = 0.
+// Em todas: lastClass, lastHttp, lastTryEndEpoch. A sonda do modelo
+// (g_models) fica com quem chama (poller_apply_results).
+struct NetResult;
+bool acct_apply_result(const NetResult& r, uint32_t intervalSec, int32_t tzOffsetSec,
+                       ThrHit* hit);
 // Detecta cruzamento de limiar após cada fetch. Baseline no 1º fetch (não
 // dispara pelo que já estava acima); zera quando a janela reseta (queda >15pp).
 // Devolve {win, thr} do cruzamento ou {-1, 0}. Se as duas janelas cruzam na
