@@ -7,10 +7,13 @@ Saída (arquivos gerados, não editar na mão):
   firmware/claude_stick/src/ui/assets_thep.h  — LV_IMAGE_DECLARE de cada imagem
   firmware/claude_stick/src/ui/assets_thep.c  — dados e lv_image_dsc_t
 
-Imagens (formato LV_COLOR_FORMAT_RGB565A8, LVGL 9.2):
+Imagens (LVGL 9.2; RGB565A8, salvo indicação):
   img_thep_logo_hdr     104x38   logo THEP do cabeçalho
   img_bird_braille_124  124x124  pássaro em braille (1 conta, limiar, incidente)
   img_bird_braille_13   13x13    pássaro em braille do rodapé
+  img_thep_logo_splash  264x96   logo THEP da tela de abertura, A1 (só o alfa;
+                                 as faixas THEP_LOGO_SPLASH_* vão no .h)
+  img_bird_braille_56   56x56    pássaro em braille da tela de abertura
 
 Entrada: assets/brand/thep-bird.png (PNG 1024x1024 com transparência).
 
@@ -20,8 +23,9 @@ Uso:
   python3 tools/gen_hermes_assets.py                 # gera os .h/.c
   python3 tools/gen_hermes_assets.py --preview DIR   # idem + PNGs de conferência
 
-As funções logo_hdr(), bird_braille_124() e bird_braille_13() devolvem as
-imagens RGBA (Pillow) e podem ser importadas por outros scripts (gen_mockups).
+As funções logo_hdr(), logo_splash(), bird_braille_124(), bird_braille_56() e
+bird_braille_13() devolvem as imagens RGBA (Pillow) e podem ser importadas por
+outros scripts (gen_mockups).
 """
 import argparse
 import os
@@ -59,18 +63,19 @@ def _hex(c: str) -> tuple:
     return tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
 
 
-def logo_hdr() -> Image.Image:
-    """Desenha o THEP por células (sem fonte) em 8x e reduz para 104x38."""
+def _draw_thep(W: int, H: int, stroke: int, colors=None) -> Image.Image:
+    """Desenha o THEP por células (sem fonte) numa imagem W x H. As bordas das
+    células são arredondadas para pixels inteiros e cobrem a imagem sem buraco;
+    o traço dos caracteres de linha tem `stroke` px, centrado na célula."""
     rows, cols = len(THEP), len(THEP[0])
-    W, H = LOGO_W * SS, LOGO_H * SS
+    colors = colors or BANDS
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    # bordas das células arredondadas na escala 8x: cobrem a imagem sem buraco
     xs = [round(c * W / cols) for c in range(cols + 1)]
     ys = [round(r * H / rows) for r in range(rows + 1)]
-    half = STROKE // 2
+    half = stroke // 2
     for r, line in enumerate(THEP):
-        col = _hex(BANDS[r]) + (255,)
+        col = _hex(colors[r]) + (255,)
         for c, ch in enumerate(line):
             x0, x1, y0, y1 = xs[c], xs[c + 1], ys[r], ys[r + 1]
             cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
@@ -100,6 +105,12 @@ def logo_hdr() -> Image.Image:
                 box(hl, hr, y0, vb)
             elif ch != " ":
                 raise ValueError(f"caractere sem desenho: {ch!r}")
+    return im
+
+
+def logo_hdr() -> Image.Image:
+    """Desenha o THEP por células (sem fonte) em 8x e reduz para 104x38."""
+    im = _draw_thep(LOGO_W * SS, LOGO_H * SS, STROKE)
     out = im.resize((LOGO_W, LOGO_H), Image.LANCZOS)
     # O LANCZOS tem lóbulos negativos: corrige o "ringing" da redução.
     #  - alfa < 8 vira 0 (pontinhos invisíveis fora das letras) e > 247 vira 255;
@@ -116,6 +127,22 @@ def logo_hdr() -> Image.Image:
         for ch in range(3):
             px[k + ch] = 0 if a == 0 else min(hi[ch], max(lo[ch], px[k + ch]))
     return Image.frombytes("RGBA", out.size, bytes(px))
+
+
+# Logo da tela de abertura (screen_splash): 264x96 = células de 8x16 px exatos,
+# traço de 2 px. Sem redução nem antisserrilhado: cada pixel é opaco ou
+# transparente, então o firmware guarda só o alfa em 1 bit (LV_COLOR_FORMAT_A1,
+# 3.168 bytes) e pinta as 3 faixas (SPLASH_BAND_H px cada) ao montar a tela.
+SPLASH_W, SPLASH_H = 264, 96
+SPLASH_STROKE = 2
+SPLASH_BAND_H = SPLASH_H // 3
+
+
+def logo_splash() -> Image.Image:
+    """THEP 264x96 RGBA com as cores das faixas (mockups e conferência)."""
+    im = _draw_thep(SPLASH_W, SPLASH_H, SPLASH_STROKE)
+    assert sum(im.getchannel("A").histogram()[1:255]) == 0, "alfa parcial no logo da abertura"
+    return im
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +169,18 @@ def bird_braille_124() -> Image.Image:
     2x2 px opacos (com borda suave ele cairia para ~78% de alfa e apagaria
     as cores). Ponto (i, j) em x = 2 + 3i, y = 2 + 3j."""
     n, step, margin, dot, size = 40, 3, 2, 2, 124
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for i, j, rgb in _bird_grid(n):
+        x, y = margin + i * step, margin + j * step
+        d.rectangle((x, y, x + dot - 1, y + dot - 1), fill=rgb + (255,))
+    return im
+
+
+def bird_braille_56() -> Image.Image:
+    """56x56 (tela de abertura): 18x18 pontos de 2x2 px, passo 3 px, 2 px de
+    margem, como o de 124 px. Ponto (i, j) em x = 2 + 3i, y = 2 + 3j."""
+    n, step, margin, dot, size = 18, 3, 2, 2, 56
     im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     for i, j, rgb in _bird_grid(n):
@@ -190,23 +229,56 @@ def from_rgb565a8(data: bytes, w: int, h: int) -> Image.Image:
     return Image.frombytes("RGBA", (w, h), bytes(px))
 
 
-def to_c(name: str, w: int, h: int, data: bytes) -> str:
-    assert len(data) == w * h * 3
+def to_a1(im: Image.Image) -> bytes:
+    """LV_COLOR_FORMAT_A1: 1 bit por pixel, bit 7 = pixel mais à esquerda,
+    cada linha com ceil(w/8) bytes. Pixel aceso = alfa >= 128."""
+    a = im.convert("RGBA").getchannel("A")
+    w, h = a.size
+    stride = (w + 7) // 8
+    out = bytearray(stride * h)
+    for y in range(h):
+        for x in range(w):
+            if a.getpixel((x, y)) >= 128:
+                out[y * stride + x // 8] |= 0x80 >> (x % 8)
+    return bytes(out)
+
+
+def from_a1(data: bytes, w: int, h: int) -> Image.Image:
+    """Decodifica de volta, em branco (para os PNGs de conferência)."""
+    stride = (w + 7) // 8
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    for y in range(h):
+        for x in range(w):
+            if data[y * stride + x // 8] & (0x80 >> (x % 8)):
+                im.putpixel((x, y), (255, 255, 255, 255))
+    return im
+
+
+# formato -> (codificador, decodificador, stride(w), bytes(w, h))
+FORMATS = {
+    "RGB565A8": (to_rgb565a8, from_rgb565a8, lambda w: w * 2, lambda w, h: w * h * 3),
+    "A1": (to_a1, from_a1, lambda w: (w + 7) // 8, lambda w, h: (w + 7) // 8 * h),
+}
+
+
+def to_c(name: str, w: int, h: int, data: bytes, cf: str = "RGB565A8") -> str:
+    stride = FORMATS[cf][2](w)
+    assert len(data) == FORMATS[cf][3](w, h)
     rows = [",".join(f"0x{v:02x}" for v in data[i:i + 24]) for i in range(0, len(data), 24)]
     body = ",\n    ".join(rows)
     return (
-        f"/* {name}: {w}x{h}, RGB565A8, {len(data)} bytes */\n"
+        f"/* {name}: {w}x{h}, {cf}, {len(data)} bytes */\n"
         f"static const uint8_t {name}_map[] __attribute__((aligned(4))) = {{\n"
         f"    {body}\n"
         f"}};\n\n"
         f"const lv_image_dsc_t {name} = {{\n"
         f"    .header = {{\n"
         f"        .magic = LV_IMAGE_HEADER_MAGIC,\n"
-        f"        .cf = LV_COLOR_FORMAT_RGB565A8,\n"
+        f"        .cf = LV_COLOR_FORMAT_{cf},\n"
         f"        .flags = 0,\n"
         f"        .w = {w},\n"
         f"        .h = {h},\n"
-        f"        .stride = {w * 2},\n"
+        f"        .stride = {stride},\n"
         f"        .reserved_2 = 0,\n"
         f"    }},\n"
         f"    .data_size = sizeof({name}_map),\n"
@@ -217,10 +289,14 @@ def to_c(name: str, w: int, h: int, data: bytes) -> str:
 
 
 IMAGES = [
-    ("img_thep_logo_hdr", logo_hdr, "logo THEP do cabeçalho"),
-    ("img_bird_braille_124", bird_braille_124,
+    ("img_thep_logo_hdr", logo_hdr, "RGB565A8", "logo THEP do cabeçalho"),
+    ("img_bird_braille_124", bird_braille_124, "RGB565A8",
      "pássaro em braille: 1 conta, limiar e incidente (recolor cinza)"),
-    ("img_bird_braille_13", bird_braille_13, "pássaro em braille do rodapé"),
+    ("img_bird_braille_13", bird_braille_13, "RGB565A8", "pássaro em braille do rodapé"),
+    ("img_thep_logo_splash", logo_splash, "A1",
+     "logo THEP da tela de abertura, só o alfa: as faixas são pintadas no firmware"),
+    ("img_bird_braille_56", bird_braille_56, "RGB565A8",
+     "pássaro em braille da tela de abertura"),
 ]
 
 HEADER_NOTE = "GERADO por tools/gen_hermes_assets.py — não editar na mão."
@@ -235,23 +311,30 @@ def main() -> None:
     h_parts = [f"// {HEADER_NOTE}", "#pragma once", "#include <lvgl.h>", "",
                "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
     c_parts = [f"/* {HEADER_NOTE} */", '#include "assets_thep.h"', ""]
-    for name, fn, desc in IMAGES:
+    for name, fn, cf, desc in IMAGES:
         im = fn()
         w, h = im.size
-        data = to_rgb565a8(im)
-        h_parts.append(f"// {desc} ({w}x{h}, RGB565A8)")
+        enc, dec_fn = FORMATS[cf][0], FORMATS[cf][1]
+        data = enc(im)
+        h_parts.append(f"// {desc} ({w}x{h}, {cf})")
         h_parts.append(f"LV_IMAGE_DECLARE({name});")
-        c_parts.append(to_c(name, w, h, data))
-        print(f"{name}: {w}x{h}, {len(data)} bytes")
+        c_parts.append(to_c(name, w, h, data, cf))
+        print(f"{name}: {w}x{h}, {cf}, {len(data)} bytes")
         if args.preview:
             os.makedirs(args.preview, exist_ok=True)
-            dec = from_rgb565a8(data, w, h)
+            dec = dec_fn(data, w, h)
             dec.save(os.path.join(args.preview, f"{name}.png"))
             bg = Image.new("RGBA", (w, h), BG_PREVIEW + (255,))
             bg.alpha_composite(dec)
             k = 8 if max(w, h) < 200 else 4
             bg.resize((w * k, h * k), Image.NEAREST).save(
                 os.path.join(args.preview, f"{name}_x{k}.png"))
+    # Faixas do logo da abertura (img_thep_logo_splash é só alfa): altura de
+    # cada faixa e as cores RGB888, de cima para baixo.
+    h_parts += ["", "// Faixas de img_thep_logo_splash, de cima para baixo (RGB888).",
+                f"#define THEP_LOGO_SPLASH_BAND_H {SPLASH_BAND_H}",
+                "#define THEP_LOGO_SPLASH_BANDS { "
+                + ", ".join("0x" + c[1:] for c in BANDS[::2]) + " }"]
     h_parts += ["", "#ifdef __cplusplus", "}", "#endif", ""]
 
     os.makedirs(UI_DIR, exist_ok=True)
