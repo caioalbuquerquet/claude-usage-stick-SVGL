@@ -9,10 +9,10 @@
 #   ./build.sh dev             # compila com -DTHEP_DEV (rotas e logs de diagnóstico)
 #   ./build.sh upload-dev [porta] # idem dev + grava
 #   ./build.sh monitor <porta> # abre o serial monitor (115200)
-#   THEP_FLAGS="-D..." ./build.sh ... # flags extras (ex.: -DDISP_ROT_FAST=1)
+#   THEP_FLAGS="-D..." ./build.sh ... # flags extras (ex.: -DDISP_BANDS=0 volta ao modo FULL)
 #
 # Pré-requisitos (ver firmware/REFERENCIA-HARDWARE-LVGL.md):
-#   - arduino-cli 1.4.x, core esp32:esp32 3.3.11
+#   - arduino-cli 1.4.x, core esp32:esp32 3.3.8 (versão em que a v3 foi validada)
 #   - libs: GFX Library for Arduino 1.6.5, lvgl 9.2.2
 #
 # O -DLV_CONF_INCLUDE_SIMPLE + -I<sketch> faz o LVGL achar o nosso lv_conf.h.
