@@ -134,10 +134,10 @@ static lv_point_precise_t g_mXPts[NMODELS][4][2];   // olhos em X (mood 3)
 #define NSEG 18                       // segmentos do medidor de janela
 struct DashUI {
   lv_obj_t *tv, *tile[NTILES], *dots[NTILES];
-  // agora (overview + reset mesclados)
-  lv_obj_t *agChip, *agPct5, *agCd5, *agAt5;
-  lv_obj_t *agPct7, *agCd7, *agAt7, *agTok, *agProj;
-  lv_obj_t *seg5[NSEG], *seg7[NSEG];  // medidores segmentados
+  // agora: uma coluna por slot salvo (fase 2, item 24)
+  struct Col { lv_obj_t *card, *name, *pct, *bar, *l5, *l7, *st; int slot; } col[ACCT_MAX];
+  int colN;
+  lv_obj_t *agTok;
   // modelos
   lv_obj_t *mChip[NMODELS];
   // tendência da janela 5h (linhas custom)
@@ -226,11 +226,6 @@ static lv_obj_t *mkbtn(lv_obj_t *p, const char *txt, const lv_font_t *font,
   lv_obj_center(mklabel(b, txt, font, fg));
   return b;
 }
-static uint32_t pct_color(float p) {
-  if (p < 70.0f) return C_OK;
-  if (p < 90.0f) return C_WARN;
-  return C_BAD;
-}
 // gradiente contínuo verde -> âmbar -> vermelho conforme o uso cresce
 static lv_color_t grad_color(float p) {
   if (p < 0) p = 0; if (p > 100) p = 100;
@@ -263,12 +258,6 @@ static void fmt_eta(uint32_t epoch, char *out, int sz) {
   if (days > 0)      snprintf(out, sz, "%dd %dh", days, hrs);
   else if (hrs > 0)  snprintf(out, sz, "%dh %02dm", hrs, mins);
   else               snprintf(out, sz, "%dm", mins);
-}
-static void fmt_clock(uint32_t epoch, char *out, int sz) {
-  if (epoch == 0 || time(nullptr) < 1000000000L) { strlcpy(out, "--:--", sz); return; }
-  time_t t = (time_t)epoch; struct tm tmv;
-  localtime_r(&t, &tmv);
-  strftime(out, sz, "%a %H:%M", &tmv);
 }
 static void fmt_hm(uint32_t epoch, char *out, int sz) {
   if (epoch == 0 || time(nullptr) < 1000000000L) { strlcpy(out, "--:--", sz); return; }
@@ -812,20 +801,6 @@ static void on_validate_result(const NetResult &r) {
 // ============================================================
 // Dashboard — helpers visuais
 // ============================================================
-static uint32_t status_color(const char *s) {
-  if (!s || !s[0]) return C_MUTED;
-  if (!strcmp(s, "rejected") || !strcmp(s, "rate_limited") || !strcmp(s, "exceeded")) return C_BAD;
-  if (strstr(s, "warning")) return C_WARN;
-  return C_OK;
-}
-static const char *overall_label(const char *s) {
-  if (!s || !s[0]) return "--";
-  if (!strcmp(s, "allowed")) return "OK";
-  if (strstr(s, "warning"))  return TRS("ATENCAO", "WARNING");
-  if (!strcmp(s, "rejected")) return TRS("BLOQUEADO", "BLOCKED");
-  return s;
-}
-
 // label posicionado vazio (preenchido em refresh_ui_values/dash_tick)
 static lv_obj_t *tlabel(lv_obj_t *p, const lv_font_t *f, uint32_t c, int x, int y) {
   lv_obj_t *l = lv_label_create(p);
@@ -1002,30 +977,78 @@ static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
 // ============================================================
 // Builders dos 4 tiles
 // ============================================================
-// Tile 0 — AGORA: janelas 5h/semana com % grande, medidor segmentado
-// (verde -> vermelho conforme o uso) e countdown grande.
-static void build_win_card(lv_obj_t *t, int x, const char *title,
-                           lv_obj_t **pct, lv_obj_t **seg, lv_obj_t **at, lv_obj_t **cd) {
-  lv_obj_t *c = card(t, x, 4, 228, 198);
-  tstatic(c, title, &lv_font_montserrat_14, C_MUTED, 0, 0);
-  *pct = tlabel(c, &lv_font_montserrat_48, C_OK, 0, 20);
-  for (int i = 0; i < NSEG; i++)                    // medidor: 18 segmentos
-    seg[i] = rrect(c, i * 11, 82, 8, 16, 2, C_TRACK);
-  *at = tlabel(c, &lv_font_montserrat_12, C_FAINT, 0, 106);
-  *cd = tlabel(c, &lv_font_montserrat_40, C_TEXT, 0, 124);
+// Tile 0 — AGORA (fase 2, item 24): uma coluna por slot salvo (1 a 4 colunas
+// iguais) com a % da 5h, os resets, a semana e a linha de estado/projeção.
+// Ainda no visual da v2.3; o screen_home da fase 3 substitui esta tela.
+// Fontes por número de colunas (tabela do item 24).
+static const lv_font_t *col_pct_font(int n) {
+  return n <= 1 ? &lv_font_montserrat_48 : n == 2 ? &lv_font_montserrat_40
+       : n == 3 ? &lv_font_montserrat_28 : &lv_font_montserrat_24;
+}
+static const lv_font_t *col_txt_font(int n) {
+  return n <= 2 ? &lv_font_montserrat_14 : &lv_font_montserrat_12;
+}
+// Tocar no card de uma conta muda o foco (Technical Plan §3).
+static void col_click_cb(lv_event_t *e) {
+  int slot = (int)(intptr_t)lv_event_get_user_data(e);
+  if (slot == g_accts.active || slot < 0 || slot >= ACCT_MAX || !g_accts.used[slot]) return;
+  accountSetActive(g_prefs, g_accts, slot);
+  Serial.printf("[ACCT] foco -> slot %d (%s)\n", slot, g_accts.label[slot]);
+  request_state(ST_MAIN);
+}
+static lv_obj_t *col_label(lv_obj_t *p, const lv_font_t *f, uint32_t c, lv_label_long_mode_t mode) {
+  lv_obj_t *l = lv_label_create(p);
+  lv_obj_set_style_text_font(l, f, 0);
+  lv_obj_set_style_text_color(l, lv_color_hex(c), 0);
+  lv_obj_set_width(l, lv_pct(100));
+  lv_label_set_long_mode(l, mode);
+  lv_label_set_text(l, "");
+  return l;
 }
 static void build_tile_agora(lv_obj_t *t) {
-  build_win_card(t, 8,   TRS("5 HORAS", "5 HOURS"), &g_ui.agPct5, g_ui.seg5, &g_ui.agAt5, &g_ui.agCd5);
-  build_win_card(t, 244, TRS("SEMANA", "WEEK"),     &g_ui.agPct7, g_ui.seg7, &g_ui.agAt7, &g_ui.agCd7);
-  // rodape em duas linhas: tokens da sessao em cima, badge + projecao 5h embaixo.
-  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 8, 205);
+  int n = 0;
+  for (int s = 0; s < ACCT_MAX; s++) if (g_accts.used[s]) n++;
+  if (n == 0) return;
+  const int GAP = 8, X0 = 8, W = 464, H = 212;
+  int w = (W - GAP * (n - 1)) / n;
+  const lv_font_t *fp = col_pct_font(n), *ft = col_txt_font(n);
+  g_ui.colN = 0;
+  for (int s = 0; s < ACCT_MAX; s++) {
+    if (!g_accts.used[s]) continue;
+    int i = g_ui.colN++;
+    auto &c = g_ui.col[i];
+    c.slot = s;
+    c.card = card(t, X0 + i * (w + GAP), 4, w, H);
+    lv_obj_set_style_pad_all(c.card, n >= 3 ? 8 : 12, 0);
+    lv_obj_set_flex_flow(c.card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(c.card, n >= 3 ? 3 : 5, 0);
+    bool focus = (s == g_accts.active);
+    if (focus && n > 1) {
+      lv_obj_set_style_border_width(c.card, 2, 0);
+      lv_obj_set_style_border_color(c.card, lv_color_hex(C_ACCENT), 0);
+    }
+    lv_obj_add_flag(c.card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(c.card, col_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)s);
+
+    c.name = col_label(c.card, ft, focus ? C_ACCENT : C_MUTED, LV_LABEL_LONG_DOT);
+    if (g_accts.label[s][0]) lv_label_set_text(c.name, g_accts.label[s]);
+    else lv_label_set_text_fmt(c.name, TRS("conta %d", "account %d"), s + 1);
+    c.pct = col_label(c.card, fp, C_TEXT, LV_LABEL_LONG_CLIP);
+    c.bar = lv_bar_create(c.card);
+    lv_obj_set_size(c.bar, lv_pct(100), 6);
+    lv_bar_set_range(c.bar, 0, 100);
+    lv_obj_set_style_bg_color(c.bar, lv_color_hex(C_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_radius(c.bar, 3, LV_PART_MAIN);
+    lv_obj_set_style_radius(c.bar, 3, LV_PART_INDICATOR);
+    lv_obj_clear_flag(c.bar, LV_OBJ_FLAG_CLICKABLE);
+    c.l5 = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_DOT);
+    c.l7 = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_DOT);
+    c.st = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_WRAP);
+  }
+  // tokens da sessão da conta em foco (bridge), no rodapé
+  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 8, 224);
   lv_obj_set_width(g_ui.agTok, 464);
   lv_obj_set_style_text_align(g_ui.agTok, LV_TEXT_ALIGN_RIGHT, 0);
-  g_ui.agChip = mkchip(t, 8, 222);
-  // leitura da projecao da janela 5h (mesma conta do tile 1), ao lado do badge
-  g_ui.agProj = tlabel(t, &lv_font_montserrat_14, C_MUTED, 100, 226);
-  lv_obj_set_width(g_ui.agProj, 372);
-  lv_label_set_long_mode(g_ui.agProj, LV_LABEL_LONG_DOT);
 }
 // Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda real.
 // Incidentes nao aparecem mais aqui: viraram o dialog da tela inicial.
@@ -1190,32 +1213,101 @@ static void update_tok_row() {
   lv_label_set_text(g_ui.agTok, s);
 }
 
-// Contadores/relógios (1s) — separado dos valores de fetch.
-static void dash_tick() {
-  if (g_state != ST_MAIN || !g_ui.agCd5) return;
-  const UsageData &u = acct[g_accts.active].usage;
-  char e[32], c[24], b[64];
-  fmt_eta(u.h5ResetEpoch, e, sizeof(e));
-  lv_label_set_text(g_ui.agCd5, e);
-  fmt_clock(u.h5ResetEpoch, c, sizeof(c));
-  snprintf(b, sizeof(b), TRS("RESETA EM \xE2\x80\xA2 %s", "RESETS \xE2\x80\xA2 %s"), c);
-  lv_label_set_text(g_ui.agAt5, b);
-
-  fmt_eta(u.d7ResetEpoch, e, sizeof(e));
-  lv_label_set_text(g_ui.agCd7, e);
-  fmt_clock(u.d7ResetEpoch, c, sizeof(c));
-  snprintf(b, sizeof(b), TRS("RESETA EM \xE2\x80\xA2 %s", "RESETS \xE2\x80\xA2 %s"), c);
-  lv_label_set_text(g_ui.agAt7, b);
-
-  set_hdr_status();
+// Projeção curta da coluna (ASCII: as Montserrat de hoje não têm ✓ ✗ ·; o
+// projection_text() da src/logic entra com a fonte da fase 3).
+static void col_proj_text(const AccountState &a, bool narrow, char *out, size_t sz, uint32_t *col) {
+  time_t now = time(nullptr);
+  uint32_t we = a.usage.h5ResetEpoch;
+  *col = C_MUTED;
+  if (now < 1000000000L || we == 0) { strlcpy(out, "--", sz); return; }
+  int n, head;
+  const Sample *hist = hist_data(a, &n, &head);
+  ProjResult pr = projection(hist, n, head, a.usage.h5, we, (uint32_t)now);
+  if (pr.st == ProjResult::SEM_DADOS) {
+    strlcpy(out, narrow ? TRS("Coletando...", "Collecting...")
+                        : TRS("Coletando dados...", "Collecting data..."), sz);
+  } else if (pr.st == ProjResult::ESGOTADA) {
+    strlcpy(out, TRS("Esgotada", "Exhausted"), sz);
+    *col = C_BAD;
+  } else if (pr.st == ProjResult::ESGOTA) {
+    char hm[12]; fmt_hm(pr.etaEpoch, hm, sizeof(hm));
+    if (narrow) snprintf(out, sz, TRS("Esgota %s", "Out %s"), hm);
+    else snprintf(out, sz, TRS("Esgota as %s (em %dh%02dm)", "Runs out %s (in %dh%02dm)"),
+                  hm, pr.minutes / 60, pr.minutes % 60);
+    *col = pr.minutes < 60 ? C_BAD : C_WARN;
+  } else if (pr.rate > 0.02f) {
+    snprintf(out, sz, TRS("Nao esgota (~%d%%)", "Won't run out (~%d%%)"), pr.pctAtReset);
+    *col = C_OK;
+  } else {
+    strlcpy(out, TRS("Uso estavel", "Stable usage"), sz);
+    *col = C_OK;
+  }
 }
 
-// Espelha a leitura da projeção da janela 5h no rodapé da tela inicial
-// (tile AGORA, ao lado do badge). Versão curta do mesmo texto do tile 1.
-static void set_ag_proj(const char *txt, uint32_t color) {
-  if (!g_ui.agProj) return;
-  lv_label_set_text(g_ui.agProj, txt);
-  lv_obj_set_style_text_color(g_ui.agProj, lv_color_hex(color), 0);
+// Valores de uma coluna, com o texto do card na precedência do Technical
+// Plan §4: SEM CHAVE; falha sem dado ("! CLASSE", --%); falha com dado
+// ("! CLASSE • idade", últimos valores); pendente ("consultando...", --%);
+// senão a projeção. O esmaecimento da falha com dado entra na fase 3.
+static void col_update(int i) {
+  auto &c = g_ui.col[i];
+  if (!c.card) return;
+  const AccountState &a = acct[c.slot];
+  bool narrow = g_ui.colN >= 3;
+  char st[64], b[48], e[24];
+  uint32_t stCol = C_MUTED;
+  bool showData = true;
+  FetchClass k = a.lastClass;
+  bool failed = (k != FC_NONE && k != FC_OK);
+  if (!a.keyOk) {
+    strlcpy(st, TRS("SEM CHAVE", "NO KEY"), sizeof(st));
+    stCol = C_BAD; showData = false;
+  } else if (failed && a.usageAtEpoch == 0) {
+    snprintf(st, sizeof(st), LV_SYMBOL_WARNING " %s", fetch_class_name(k));
+    stCol = C_BAD; showData = false;
+  } else if (failed) {
+    uint32_t now = (uint32_t)time(nullptr);
+    char age[12];
+    age_text(now > a.usageAtEpoch ? now - a.usageAtEpoch : 0, age, sizeof(age));
+    snprintf(st, sizeof(st), LV_SYMBOL_WARNING " %s \xE2\x80\xA2 %s", fetch_class_name(k), age);
+    stCol = C_BAD;
+  } else if (k == FC_NONE) {
+    strlcpy(st, TRS("consultando...", "querying..."), sizeof(st));
+    showData = false;
+  } else {
+    col_proj_text(a, narrow, st, sizeof(st), &stCol);
+  }
+  lv_label_set_text(c.st, st);
+  lv_obj_set_style_text_color(c.st, lv_color_hex(stCol), 0);
+
+  const UsageData &u = a.usage;
+  if (!showData) {
+    lv_label_set_text(c.pct, "--%");
+    lv_obj_set_style_text_color(c.pct, lv_color_hex(C_FAINT), 0);
+    lv_bar_set_value(c.bar, 0, LV_ANIM_OFF);
+    lv_label_set_text(c.l5, narrow ? "5h --" : TRS("5h: --", "5h: --"));
+    lv_label_set_text(c.l7, narrow ? "7d --" : TRS("semana: --", "week: --"));
+    return;
+  }
+  snprintf(b, sizeof(b), "%d%%", (int)(u.h5 + 0.5f));
+  lv_label_set_text(c.pct, b);
+  lv_color_t gc = grad_color(u.h5);
+  lv_obj_set_style_text_color(c.pct, gc, 0);
+  lv_bar_set_value(c.bar, (int32_t)(u.h5 + 0.5f), LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(c.bar, gc, LV_PART_INDICATOR);
+  fmt_eta(u.h5ResetEpoch, e, sizeof(e));
+  snprintf(b, sizeof(b), narrow ? "5h %s" : TRS("5h: reseta em %s", "5h: resets in %s"), e);
+  lv_label_set_text(c.l5, b);
+  fmt_eta(u.d7ResetEpoch, e, sizeof(e));
+  snprintf(b, sizeof(b), narrow ? "7d %d%% \xE2\x80\xA2 %s" : TRS("semana: %d%% \xE2\x80\xA2 %s", "week: %d%% \xE2\x80\xA2 %s"),
+           (int)(u.d7 + 0.5f), e);
+  lv_label_set_text(c.l7, b);
+}
+
+// Contadores, idades e projeções (1s) — separado da chegada de resultados.
+static void dash_tick() {
+  if (g_state != ST_MAIN) return;
+  for (int i = 0; i < g_ui.colN; i++) col_update(i);
+  set_hdr_status();
 }
 
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
@@ -1234,7 +1326,6 @@ static void trend_redraw() {
     lv_obj_add_flag(g_ui.trDot, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_ui.trCap, TRS("Aguardando dados da janela...", "Waiting for window data..."));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
-    set_ag_proj(TRS("Aguardando dados...", "Waiting for data..."), C_MUTED);
     return;
   }
   uint32_t ws = we - 5 * 3600;
@@ -1277,7 +1368,6 @@ static void trend_redraw() {
     lv_label_set_text(g_ui.trCap, TRS("Coletando dados... (~alguns minutos)",
                                       "Collecting data... (~a few minutes)"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
-    set_ag_proj(TRS("Coletando dados...", "Collecting data..."), C_MUTED);
     return;
   }
 
@@ -1289,9 +1379,6 @@ static void trend_redraw() {
                                "Window exhausted \xE2\x80\xA2 resets in %s"), e);
     lv_label_set_text(g_ui.trCap, b);
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_BAD), 0);
-    snprintf(b, sizeof(b), TRS("Esgotada \xE2\x80\xA2 reseta em %s",
-                               "Exhausted \xE2\x80\xA2 resets in %s"), e);
-    set_ag_proj(b, C_BAD);
   } else if (pr.st == ProjResult::ESGOTA) {
     g_trProjPts[0].x = cx; g_trProjPts[0].y = cy;
     g_trProjPts[1].x = tr_x(pr.etaEpoch, ws, we);
@@ -1303,9 +1390,6 @@ static void trend_redraw() {
              hm, pr.minutes / 60, pr.minutes % 60);
     lv_label_set_text(g_ui.trCap, b);
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(col), 0);
-    snprintf(b, sizeof(b), TRS("Esgota as %s (em %dh%02dm)", "Runs out at %s (in %dh%02dm)"),
-             hm, pr.minutes / 60, pr.minutes % 60);
-    set_ag_proj(b, col);
     lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
   } else if (pr.rate > 0.02f) {
     // OK_ATE_RESET com consumo relevante: linha até o reset, na % prevista
@@ -1317,17 +1401,12 @@ static void trend_redraw() {
              pr.pctAtReset);
     lv_label_set_text(g_ui.trCap, b);
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
-    snprintf(b, sizeof(b), TRS("NAO esgota antes do reset (%d%%)",
-                               "Does NOT run out before reset (%d%%)"),
-             pr.pctAtReset);
-    set_ag_proj(b, C_OK);
     lv_line_set_points(g_ui.trProj, g_trProjPts, 2);
   } else {
     lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
     lv_label_set_text(g_ui.trCap, TRS("Uso estavel \xE2\x80\xA2 sem risco no momento",
                                       "Stable usage \xE2\x80\xA2 no risk right now"));
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_OK), 0);
-    set_ag_proj(TRS("Uso estavel \xE2\x80\xA2 sem risco", "Stable \xE2\x80\xA2 no risk"), C_OK);
   }
 }
 
@@ -1701,20 +1780,8 @@ static void incident_sync() {
 
 // Preenche todos os valores vindos do fetch (sem rebuild de tela).
 static void refresh_ui_values() {
-  if (g_state != ST_MAIN || !g_ui.agPct5) return;
-  const UsageData &u = acct[g_accts.active].usage;
-  char b[96];
-
-  // Agora: percentuais + medidores segmentados (cor desliza verde -> vermelho)
-  snprintf(b, sizeof(b), "%d%%", (int)(u.h5 + 0.5f)); lv_label_set_text(g_ui.agPct5, b);
-  lv_obj_set_style_text_color(g_ui.agPct5, grad_color(u.h5), 0);
-  set_meter(g_ui.seg5, u.h5);
-  snprintf(b, sizeof(b), "%d%%", (int)(u.d7 + 0.5f)); lv_label_set_text(g_ui.agPct7, b);
-  lv_obj_set_style_text_color(g_ui.agPct7, grad_color(u.d7), 0);
-  set_meter(g_ui.seg7, u.d7);
-
-  set_chip(g_ui.agChip, overall_label(u.statusOverall), status_color(u.statusOverall));
-  update_tok_row();
+  if (g_state != ST_MAIN || !g_ui.tv) return;
+  update_tok_row();          // as colunas do tile 0 são atualizadas em dash_tick()
 
   // Modelos: chips de sonda
   for (int i = 0; i < NMODELS; i++) {
@@ -1799,20 +1866,6 @@ static void ui_main() {
 
   g_hdrStatus = mklabel(scr, "", &lv_font_montserrat_12, C_MUTED);
   lv_obj_align(g_hdrStatus, LV_ALIGN_TOP_RIGHT, -92, 16);
-
-  // Badge da conta ativa. A faixa livre do cabecalho e estreita: o hotspot do
-  // logo termina em x=134 e o botao de atualizar (56 px centrado, mais 10 px de
-  // ext_click_area) passa a capturar toque em x=202. Ficar em 138..194 deixa
-  // 8 px de folga do lado direito — encostar em 202 faria o toque "no badge"
-  // disparar o refresh. LONG_DOT corta o rotulo que nao couber.
-  if (accountCount(g_accts) > 1) {
-    char ab[ACCT_LBL_MAX + 1];
-    snprintf(ab, sizeof(ab), "@%s", g_accts.label[g_accts.active]);
-    lv_obj_t *acct = mklabel(scr, ab, &lv_font_montserrat_12, C_ACCENT);
-    lv_obj_set_width(acct, 56);
-    lv_label_set_long_mode(acct, LV_LABEL_LONG_DOT);
-    lv_obj_align(acct, LV_ALIGN_TOP_LEFT, 138, 16);
-  }
 
   lv_obj_t *gear = mkbtn(scr, LV_SYMBOL_SETTINGS, &lv_font_montserrat_22, C_SURFACE2, C_TEXT);
   lv_obj_set_size(gear, 78, 40);
