@@ -27,12 +27,12 @@
 #include <time.h>
 #include <math.h>
 #include "config.h"
-#include "touch.h"
-#include "wifi_manager.h"
-#include "api.h"
-#include "status.h"
-#include "crypto.h"
-#include "accounts.h"
+#include "hw/touch.h"
+#include "hw/wifi_manager.h"
+#include "net/api.h"
+#include "net/status.h"
+#include "sec/crypto.h"
+#include "model/accounts.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
 

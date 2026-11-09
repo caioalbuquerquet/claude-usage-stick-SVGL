@@ -1,6 +1,6 @@
-#include "api.h"
+#include "net/api.h"
 #include "config.h"
-#include "certs.h"
+#include "net/certs.h"
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>

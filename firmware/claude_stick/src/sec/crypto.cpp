@@ -1,4 +1,4 @@
-#include "crypto.h"
+#include "sec/crypto.h"
 #include "config.h"
 #include "mbedtls/gcm.h"
 #include "mbedtls/sha256.h"
