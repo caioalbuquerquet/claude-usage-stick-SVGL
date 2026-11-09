@@ -5,6 +5,14 @@
 
 AccountState* acct = nullptr;
 
+ModelInfo g_models[NMODELS] = {
+  {"Haiku",  "claude-haiku-4-5-20251001", {0, 0}, 0},
+  {"Sonnet", "claude-sonnet-5",           {0, 0}, 0},
+  {"Opus",   "claude-opus-4-8",           {0, 0}, 0},
+  {"Fable",  "claude-fable-5",            {0, 0}, 0},
+};
+ModelStatus g_status = {true, true, true, true, false, SEV_NONE, {{0}, {0}, {0}, {0}}};
+
 bool acct_init() {
   if (acct) return true;
   acct = (AccountState*)heap_caps_calloc(ACCT_MAX, sizeof(AccountState), MALLOC_CAP_SPIRAM);

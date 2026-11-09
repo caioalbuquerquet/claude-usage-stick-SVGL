@@ -7,6 +7,7 @@
 #include "logic/fetch_class.h"
 #include "logic/sample.h"
 #include "net/api.h"
+#include "net/status.h"
 #include "model/accounts.h"   // ACCT_MAX
 
 // ---- Heatmap por dia (para o filtro hoje/7d/30d) ----
@@ -52,6 +53,13 @@ struct AccountState {
   ThrState thr;
   TokenStats tok;
 };
+
+// ---- Modelos sondados e status.claude.com (fase 2: vieram do .ino) ----
+// A sonda de cada modelo vem do USAGE da conta em foco (rodízio no agendador).
+#define NMODELS 4
+struct ModelInfo { const char *name; const char *id; ProbeResult pr; uint32_t atMs; };
+extern ModelInfo g_models[NMODELS];
+extern ModelStatus g_status;   // última leitura boa do status.claude.com
 
 // ACCT_MAX registros em PSRAM, alocados por acct_init(). Só o loop() mexe.
 extern AccountState* acct;

@@ -6,6 +6,8 @@
 #include <LittleFS.h>
 #include <time.h>
 #include <string.h>
+#include "config.h"
+#include "logic/schedule.h"
 
 // ============================================================
 // Histórico / heatmap
@@ -93,7 +95,13 @@ void hist_reset_ram(AccountState& a) {
   memset(a.days, 0, sizeof(a.days));
   a.dayN = 0;
 }
-void hist_save(int slot, const AccountState& a) {
+bool hist_save_due(const AccountState& a, uint32_t now) {
+  return hist_save_is_due(now, a.lastSaveEpoch, a.usage.h5ResetEpoch, a.lastSavedReset,
+                          HIST_SAVE_MIN_SEC);
+}
+void hist_save(int slot, AccountState& a) {
+  a.lastSaveEpoch = (uint32_t)time(nullptr);
+  a.lastSavedReset = a.usage.h5ResetEpoch;
   char pth[16]; hist_path(slot, pth, sizeof(pth));
   File f = LittleFS.open(pth, "w");
   if (!f) return;

@@ -75,18 +75,9 @@ static State g_pending = ST_BOOT;
 static bool  g_dirty = false;
 static void request_state(State s) { g_pending = s; g_dirty = true; }
 
-// ---- Dados ----
-static ModelStatus g_status = {true, true, true, true, false, SEV_NONE};
+// ---- Dados: g_status e g_models[] ficam em src/model/account_state ----
 
 // ---- Modelos sondados (1 por ciclo, rotativo) ----
-#define NMODELS 4
-struct ModelInfo { const char *name; const char *id; ProbeResult pr; uint32_t atMs; };
-static ModelInfo g_models[NMODELS] = {
-  {"Haiku",  "claude-haiku-4-5-20251001", {0, 0}, 0},
-  {"Sonnet", "claude-sonnet-5",           {0, 0}, 0},
-  {"Opus",   "claude-opus-4-8",           {0, 0}, 0},
-  {"Fable",  "claude-fable-5",            {0, 0}, 0},
-};
 static int g_probeIdx = 0;
 
 // ---- Uso, tokens por sessao, limiares e historico por conta: acct[] (src/model/account_state.h).
