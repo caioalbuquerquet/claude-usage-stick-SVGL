@@ -27,3 +27,7 @@ __pycache__/
 
 # binários de backup locais (não versionar)
 backups/
+
+# ───────── Ferramentas ─────────
+# tools/.cache/: TTF baixadas e venv do tools/gen_fonts.sh
+tools/.cache/
