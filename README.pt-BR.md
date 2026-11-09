@@ -432,7 +432,9 @@ python3 tools/token_bridge.py --config-dir ~/.claude-pessoal  --account Pessoal 
 
 Isso muda o jeito de abrir o Claude Code no dia a dia (faça login uma vez dentro de cada alias). Em
 máquinas separadas, só o `--account` basta. Se o rótulo não existe no gadget, a ponte avisa e pula
-o envio. Uma ponte antiga (sem `?account=`) continua funcionando, mas só para a conta em foco.
+o envio. Uma ponte antiga (sem `?account=`) continua funcionando, mas só para a conta em foco. A
+ponte nova também funciona com um device na v2.3: ela confere qual conta a v2.3 informa como ativa
+e pula o envio para qualquer outra.
 
 ### Atualizando da v2.3 (e da v2.1)
 

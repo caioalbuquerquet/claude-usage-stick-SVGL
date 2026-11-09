@@ -424,7 +424,8 @@ python3 tools/token_bridge.py --config-dir ~/.claude-personal --account Pessoal 
 This changes how you start Claude Code day to day (log in once inside each alias). On separate
 machines, `--account` alone is enough. If a label doesn't exist on the gadget, the bridge says so
 and skips the push. An old bridge (without `?account=`) keeps working, but only for the focused
-account.
+account. The new bridge also works against a v2.3 device: it checks which account v2.3 reports as
+active and skips the push for any other.
 
 ### Upgrading from v2.3 (and from v2.1)
 
