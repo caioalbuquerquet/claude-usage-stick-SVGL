@@ -39,6 +39,7 @@
 #include "net/scheduler.h"
 #include "net/token_store.h"
 #include "app/web_api.h"
+#include "ui/i18n.h"
 #include <mbedtls/platform_util.h>
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
@@ -60,8 +61,7 @@
 #define C_SEV_MAJOR 0xFB923C   // laranja: gravidade "major" do status.claude.com
 
 // ---- Idioma (0 = portugues, 1 = english; Ajustes -> NVS "lang") ----
-uint8_t g_lang = 0;                          // lido por web_api.cpp (TRS)
-#define TRS(pt, en) (g_lang ? (en) : (pt))
+uint8_t g_lang = 0;                          // lido por web_api.cpp (TRS); TRS vem de ui/i18n.h
 
 // ---- Hardware ----
 Arduino_Canvas *gfx = nullptr;
