@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "ui/screens.h"
+#include "ui/overlay_incident.h"
 #include "ui/theme.h"
 #include "ui/i18n.h"
 #include "app/app_state.h"
