@@ -1,0 +1,1113 @@
+{
+ "version": 1,
+ "color": {
+  "themes": [
+   {
+    "id": "light",
+    "name": "Light"
+   },
+   {
+    "id": "dark",
+    "name": "Dark"
+   },
+   {
+    "id": "ac-f1",
+    "name": "Ac F1"
+   },
+   {
+    "id": "ac-f2",
+    "name": "Ac F2"
+   }
+  ],
+  "tokens": [
+   {
+    "name": "thep-navy",
+    "value": "#122852",
+    "usage": "Azul Marinho — cor principal da marca"
+   },
+   {
+    "name": "thep-blue",
+    "value": "#1272c2",
+    "usage": "Azul Thep — cor de ação (botões, links)"
+   },
+   {
+    "name": "thep-teal",
+    "value": "#109c8f",
+    "usage": "Apoio às primárias"
+   },
+   {
+    "name": "thep-green",
+    "value": "#5caf4e",
+    "usage": "Apoio às primárias"
+   },
+   {
+    "name": "thep-cyan",
+    "value": "#2fb5dd",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-purple",
+    "value": "#7f5fae",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-lilac",
+    "value": "#9382c9",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-magenta",
+    "value": "#97035a",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-pink",
+    "value": "#f27fa2",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-rose",
+    "value": "#f69caf",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-peach",
+    "value": "#f5c37b",
+    "usage": "Secundária do gradiente do símbolo — ilustrações, gráficos e materiais do aluno"
+   },
+   {
+    "name": "thep-white",
+    "value": "#ffffff",
+    "usage": "Neutro"
+   },
+   {
+    "name": "thep-gray",
+    "value": "#4b4b4b",
+    "usage": "Neutro (cinza #4B4B4B)"
+   },
+   {
+    "name": "thep-black",
+    "value": "#000000",
+    "usage": "Neutro"
+   },
+   {
+    "name": "thep-neutral-50",
+    "value": "#f5f7fa"
+   },
+   {
+    "name": "thep-neutral-100",
+    "value": "#e9eef4"
+   },
+   {
+    "name": "thep-neutral-200",
+    "value": "#cdd6e0"
+   },
+   {
+    "name": "thep-neutral-300",
+    "value": "#b2bfcd"
+   },
+   {
+    "name": "thep-neutral-400",
+    "value": "#8a98a8"
+   },
+   {
+    "name": "thep-neutral-500",
+    "value": "#64748b"
+   },
+   {
+    "name": "thep-neutral-600",
+    "value": "#475569"
+   },
+   {
+    "name": "thep-neutral-700",
+    "value": "#334155"
+   },
+   {
+    "name": "thep-neutral-800",
+    "value": "#1e293b"
+   },
+   {
+    "name": "thep-neutral-900",
+    "value": "#0f172a"
+   },
+   {
+    "name": "color-bg",
+    "value": {
+     "light": "#ffffff",
+     "dark": "#0c1222"
+    }
+   },
+   {
+    "name": "color-bg-subtle",
+    "value": {
+     "light": "#f5f7fa",
+     "dark": "#101a2e"
+    }
+   },
+   {
+    "name": "color-surface",
+    "value": {
+     "light": "#ffffff",
+     "dark": "#141e33"
+    }
+   },
+   {
+    "name": "color-surface-muted",
+    "value": {
+     "light": "#f5f7fa",
+     "dark": "#1a2740"
+    }
+   },
+   {
+    "name": "color-surface-inverse",
+    "value": {
+     "light": "#122852",
+     "dark": "#e4eaf1"
+    }
+   },
+   {
+    "name": "color-text",
+    "value": {
+     "light": "#122852",
+     "dark": "#e2e8f0"
+    }
+   },
+   {
+    "name": "color-text-body",
+    "value": {
+     "light": "#334155",
+     "dark": "#cbd5e1"
+    }
+   },
+   {
+    "name": "color-text-muted",
+    "value": {
+     "light": "#64748b",
+     "dark": "#94a3b8"
+    }
+   },
+   {
+    "name": "color-text-inverse",
+    "value": {
+     "light": "#ffffff",
+     "dark": "#122852"
+    }
+   },
+   {
+    "name": "color-text-link",
+    "value": {
+     "light": "#1272c2",
+     "dark": "#5aa6e6"
+    }
+   },
+   {
+    "name": "color-border",
+    "value": {
+     "light": "#cdd6e0",
+     "dark": "#1e3050"
+    }
+   },
+   {
+    "name": "color-border-strong",
+    "value": {
+     "light": "#b2bfcd",
+     "dark": "#2a4066"
+    }
+   },
+   {
+    "name": "color-ring",
+    "value": {
+     "light": "#1272c2",
+     "dark": "#2fb5dd"
+    }
+   },
+   {
+    "name": "color-primary",
+    "value": {
+     "light": "#1272c2",
+     "dark": "#2f8fd6"
+    }
+   },
+   {
+    "name": "color-primary-hover",
+    "value": {
+     "light": "#0f63ab",
+     "dark": "#4aa0e0"
+    }
+   },
+   {
+    "name": "color-primary-active",
+    "value": {
+     "light": "#0d5594",
+     "dark": "#1272c2"
+    }
+   },
+   {
+    "name": "color-primary-fg",
+    "value": {
+     "light": "#ffffff",
+     "dark": "#ffffff"
+    }
+   },
+   {
+    "name": "color-institutional",
+    "value": {
+     "light": "#122852",
+     "dark": "#0c1222"
+    }
+   },
+   {
+    "name": "color-accent",
+    "value": {
+     "light": "#f5c37b",
+     "dark": "#f5c37b"
+    }
+   },
+   {
+    "name": "color-accent-fg",
+    "value": {
+     "light": "#122852",
+     "dark": "#122852"
+    }
+   },
+   {
+    "name": "color-success",
+    "value": {
+     "light": "#15803d",
+     "dark": "#5caf4e"
+    }
+   },
+   {
+    "name": "color-success-bg",
+    "value": {
+     "light": "#dcfce7",
+     "dark": "#14321b"
+    }
+   },
+   {
+    "name": "color-warning",
+    "value": {
+     "light": "#c2680f",
+     "dark": "#f0a32a"
+    }
+   },
+   {
+    "name": "color-warning-bg",
+    "value": {
+     "light": "#fef3c7",
+     "dark": "#3a2a0a"
+    }
+   },
+   {
+    "name": "color-danger",
+    "value": {
+     "light": "#97035a",
+     "dark": "#f27fa2"
+    }
+   },
+   {
+    "name": "color-danger-bg",
+    "value": {
+     "light": "#fde7f1",
+     "dark": "#3a1226"
+    }
+   },
+   {
+    "name": "color-info",
+    "value": {
+     "light": "#1272c2",
+     "dark": "#2fb5dd"
+    }
+   },
+   {
+    "name": "color-info-bg",
+    "value": {
+     "light": "#dbeafe",
+     "dark": "#10243a"
+    }
+   },
+   {
+    "name": "overlay-photo",
+    "value": "rgba(18, 40, 82, 0.7)"
+   },
+   {
+    "name": "ac-space-950",
+    "value": "#070b18"
+   },
+   {
+    "name": "ac-space-900",
+    "value": "#0c1222"
+   },
+   {
+    "name": "ac-space-800",
+    "value": "#121a35"
+   },
+   {
+    "name": "ac-space-700",
+    "value": "#1a2447"
+   },
+   {
+    "name": "ac-space-600",
+    "value": "#24315c"
+   },
+   {
+    "name": "ac-space-500",
+    "value": "#34457a"
+   },
+   {
+    "name": "ac-dominada",
+    "value": "#109c8f",
+    "usage": "Estado de trilha: fase dominada (teal)"
+   },
+   {
+    "name": "ac-dominada-ink",
+    "value": "#34c7b6",
+    "usage": "Texto de \"dominada\" sobre o espaço — contraste AA garantido"
+   },
+   {
+    "name": "ac-concluida",
+    "value": "#1272c2",
+    "usage": "Estado de trilha: fase concluída (azul)"
+   },
+   {
+    "name": "ac-concluida-ink",
+    "value": "#6cb2ec",
+    "usage": "Texto de \"concluída\" sobre o espaço — contraste AA garantido"
+   },
+   {
+    "name": "ac-disponivel",
+    "value": "#f5c37b",
+    "usage": "Estado de trilha: fase disponível (pêssego)"
+   },
+   {
+    "name": "ac-disponivel-ink",
+    "value": "#f5c37b",
+    "usage": "Texto de \"disponível\" sobre o espaço — contraste AA garantido"
+   },
+   {
+    "name": "ac-bloqueada-fill",
+    "value": "#2b3557"
+   },
+   {
+    "name": "ac-bloqueada-ink",
+    "value": "#93a1bd",
+    "usage": "Texto de \"bloqueada\" sobre o espaço — contraste AA garantido"
+   },
+   {
+    "name": "ac-dificuldade",
+    "value": "#97035a",
+    "usage": "Estado de trilha: dificuldade detectada (magenta)"
+   },
+   {
+    "name": "ac-dificuldade-ink",
+    "value": "#f8a5bd",
+    "usage": "Texto de \"dificuldade\" sobre o espaço — contraste AA garantido"
+   },
+   {
+    "name": "ac-moeda",
+    "value": "#f5c37b"
+   },
+   {
+    "name": "ac-meta-semana",
+    "value": "#f2762e",
+    "usage": "Meta da semana definida pelo aluno (substituiu a ofensiva em 18/09/2026)"
+   },
+   {
+    "name": "ac-duelo",
+    "value": "#9382c9"
+   },
+   {
+    "name": "ac-medalha-bronze",
+    "value": "#c58a5a"
+   },
+   {
+    "name": "ac-medalha-prata",
+    "value": "#c3ccd9"
+   },
+   {
+    "name": "ac-medalha-ouro",
+    "value": "#f0bb54"
+   },
+   {
+    "name": "ac-acerto",
+    "value": "#5caf4e"
+   },
+   {
+    "name": "ac-acerto-ink",
+    "value": "#8ed57f"
+   },
+   {
+    "name": "ac-acerto-bg",
+    "value": "rgba(92, 175, 78, 0.16)"
+   },
+   {
+    "name": "ac-erro",
+    "value": "#f27fa2"
+   },
+   {
+    "name": "ac-erro-ink",
+    "value": "#f8a5bd"
+   },
+   {
+    "name": "ac-erro-bg",
+    "value": "rgba(151, 3, 90, 0.22)"
+   },
+   {
+    "name": "ac-text",
+    "value": "#eef2f9"
+   },
+   {
+    "name": "ac-text-muted",
+    "value": "#9fadc8"
+   },
+   {
+    "name": "ac-text-on-light",
+    "value": "#122852"
+   },
+   {
+    "name": "ac-scrim",
+    "value": "rgba(7, 11, 24, 0.86)"
+   },
+   {
+    "name": "ac-scrim-soft",
+    "value": "rgba(12, 18, 34, 0.82)"
+   },
+   {
+    "name": "chart-1",
+    "value": {
+     "light": "#338bea",
+     "dark": "#136dbe"
+    },
+    "usage": "Série 1 de gráfico — azul vivo do pássaro; a série principal"
+   },
+   {
+    "name": "chart-2",
+    "value": {
+     "light": "#4f416a",
+     "dark": "#b29dd7"
+    },
+    "usage": "Série 2 de gráfico — roxo do pássaro"
+   },
+   {
+    "name": "chart-3",
+    "value": {
+     "light": "#c77386",
+     "dark": "#cb5474"
+    },
+    "usage": "Série 3 de gráfico — rosa do pássaro"
+   },
+   {
+    "name": "chart-4",
+    "value": {
+     "light": "#598e21",
+     "dark": "#c8fd8b"
+    },
+    "usage": "Série 4 de gráfico — verde limão do pássaro"
+   },
+   {
+    "name": "chart-5",
+    "value": {
+     "light": "#006553",
+     "dark": "#53d5b7"
+    },
+    "usage": "Série 5 de gráfico — teal do pássaro"
+   },
+   {
+    "name": "chart-6",
+    "value": {
+     "light": "#147a9b",
+     "dark": "#1689ae"
+    },
+    "usage": "Série 6 de gráfico — ciano do pássaro; matiz preservado, luminosidade ajustada"
+   },
+   {
+    "name": "chart-7",
+    "value": {
+     "light": "#150be9",
+     "dark": "#847ff9"
+    },
+    "usage": "Série 7 de gráfico — violeta do pássaro; matiz preservado, luminosidade ajustada"
+   },
+   {
+    "name": "chart-8",
+    "value": {
+     "light": "#3f601c",
+     "dark": "#74b134"
+    },
+    "usage": "Série 8 de gráfico — verde-limão do pássaro; última da escala, acima de 8 séries agrupe o excedente"
+   },
+   {
+    "name": "chart-1-ink",
+    "value": {
+     "light": "#1a6fc0",
+     "dark": "#4589dd"
+    },
+    "usage": "Série 1 quando a cor também é texto — azul vivo escurecido para 4,58:1"
+   },
+   {
+    "name": "chart-2-ink",
+    "value": {
+     "light": "#4f416a",
+     "dark": "#b29dd7"
+    },
+    "usage": "Série 2 quando a cor também é texto — igual à série, que já passa 4,5:1"
+   },
+   {
+    "name": "chart-3-ink",
+    "value": {
+     "light": "#a55468",
+     "dark": "#d75f7e"
+    },
+    "usage": "Série 3 quando a cor também é texto — rosa escurecido para 4,59:1"
+   },
+   {
+    "name": "chart-4-ink",
+    "value": {
+     "light": "#467c09",
+     "dark": "#c8fd8b"
+    },
+    "usage": "Série 4 quando a cor também é texto — verde limão escurecido para 4,50:1 no claro"
+   },
+   {
+    "name": "chart-5-ink",
+    "value": {
+     "light": "#006553",
+     "dark": "#53d5b7"
+    },
+    "usage": "Série 5 quando a cor também é texto — igual à série, que já passa 4,5:1"
+   },
+   {
+    "name": "chart-6-ink",
+    "value": {
+     "light": "#147798",
+     "dark": "#1790b6"
+    },
+    "usage": "Série 6 quando a cor também vira texto (mín. 4,5:1, não 3:1)"
+   },
+   {
+    "name": "chart-7-ink",
+    "value": {
+     "light": "#150be9",
+     "dark": "#847ff9"
+    },
+    "usage": "Série 7 quando a cor também vira texto (mín. 4,5:1, não 3:1)"
+   },
+   {
+    "name": "chart-8-ink",
+    "value": {
+     "light": "#3f601c",
+     "dark": "#74b134"
+    },
+    "usage": "Série 8 quando a cor também vira texto (mín. 4,5:1, não 3:1)"
+   }
+  ]
+ },
+ "type": {
+  "fonts": [],
+  "families": {
+   "display": "\"Instrument Serif\", Cambria, Georgia, \"Times New Roman\", serif",
+   "sans": "\"Geist\", system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",
+   "mono": "\"Geist Mono\", ui-monospace, \"SF Mono\", Menlo, monospace",
+   "ac-font-display": "'Baloo 2', 'Trebuchet MS', \"Geist\", system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif, sans-serif",
+   "ac-font-body": "\"Geist\", system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif, sans-serif"
+  },
+  "groups": [
+   {
+    "name": "Type scale",
+    "family": "sans",
+    "styles": [
+     {
+      "name": "text-display",
+      "fontSize": "64px",
+      "lineHeight": "72px",
+      "usage": "H1 · Display (Instrument Serif)"
+     },
+     {
+      "name": "text-h2",
+      "fontSize": "44px",
+      "lineHeight": "52px",
+      "usage": "Título"
+     },
+     {
+      "name": "text-h3",
+      "fontSize": "28px",
+      "lineHeight": "36px",
+      "usage": "Subtítulo"
+     },
+     {
+      "name": "text-h4",
+      "fontSize": "20px",
+      "lineHeight": "28px",
+      "usage": "Cabeçalho"
+     },
+     {
+      "name": "text-body",
+      "fontSize": "16px",
+      "lineHeight": "24px",
+      "usage": "Corpo — 60–80 caracteres por linha"
+     },
+     {
+      "name": "text-small",
+      "fontSize": "13px",
+      "lineHeight": "20px",
+      "usage": "Legendas, metadados, UI densa"
+     },
+     {
+      "name": "text-eyebrow",
+      "fontSize": "10px",
+      "lineHeight": "14px",
+      "letterSpacing": "0.16em",
+      "usage": "Eyebrows e tags em caixa alta"
+     },
+     {
+      "name": "ac-text-hero",
+      "fontSize": "44px",
+      "usage": "Nome do mundo, tela de vitória",
+      "lineHeight": "1.1",
+      "family": "ac-font-display"
+     },
+     {
+      "name": "ac-text-title",
+      "fontSize": "30px",
+      "usage": "Título de planeta ou fase",
+      "lineHeight": "1.1",
+      "family": "ac-font-display"
+     },
+     {
+      "name": "ac-text-section",
+      "fontSize": "21px",
+      "usage": "Título de card, nome de matéria",
+      "lineHeight": "1.1",
+      "family": "ac-font-display"
+     },
+     {
+      "name": "ac-text-body",
+      "fontSize": "16px",
+      "lineHeight": "1.55",
+      "usage": "Enunciado, diálogo do NPC",
+      "family": "ac-font-body"
+     },
+     {
+      "name": "ac-text-small",
+      "fontSize": "14px",
+      "lineHeight": "1.55",
+      "usage": "Rótulo de nó, botão secundário",
+      "family": "ac-font-body"
+     },
+     {
+      "name": "ac-text-label",
+      "fontSize": "14px",
+      "lineHeight": "1.4",
+      "usage": "Rótulo curto lido pelo aluno — piso de 14px",
+      "family": "ac-font-body"
+     },
+     {
+      "name": "ac-text-eyebrow",
+      "fontSize": "12px",
+      "lineHeight": "1.3",
+      "letterSpacing": "0.08em",
+      "usage": "Rótulo em caixa alta com tracking — único caso permitido abaixo de 14px",
+      "family": "ac-font-body"
+     }
+    ]
+   }
+  ]
+ },
+ "spacing": {
+  "tokens": [
+   {
+    "name": "space-1",
+    "value": "4px"
+   },
+   {
+    "name": "space-2",
+    "value": "8px"
+   },
+   {
+    "name": "space-3",
+    "value": "12px"
+   },
+   {
+    "name": "space-4",
+    "value": "16px"
+   },
+   {
+    "name": "space-6",
+    "value": "24px"
+   },
+   {
+    "name": "space-8",
+    "value": "32px"
+   },
+   {
+    "name": "space-12",
+    "value": "48px"
+   },
+   {
+    "name": "space-16",
+    "value": "64px"
+   },
+   {
+    "name": "space-24",
+    "value": "96px"
+   },
+   {
+    "name": "grid-gutter",
+    "value": "8px"
+   },
+   {
+    "name": "container-max",
+    "value": "1200px"
+   },
+   {
+    "name": "container-pad-min",
+    "value": "16px"
+   },
+   {
+    "name": "container-pad-max",
+    "value": "48px"
+   },
+   {
+    "name": "a4-margin-top",
+    "value": "56px"
+   },
+   {
+    "name": "a4-margin-side",
+    "value": "56px"
+   },
+   {
+    "name": "a4-margin-bottom",
+    "value": "48px"
+   },
+   {
+    "name": "slide-margin",
+    "value": "64px"
+   },
+   {
+    "name": "slide-footer-reserve",
+    "value": "80px"
+   },
+   {
+    "name": "logo-min-digital",
+    "value": "24px"
+   },
+   {
+    "name": "logo-min-print",
+    "value": "18px"
+   },
+   {
+    "name": "symbol-min",
+    "value": "16px"
+   },
+   {
+    "name": "ac-ls-label",
+    "value": "0.08em"
+   },
+   {
+    "name": "ac-hit-min",
+    "value": "48px"
+   },
+   {
+    "name": "ac-hit-f1",
+    "value": "56px"
+   },
+   {
+    "name": "ac-node-size",
+    "value": "64px"
+   },
+   {
+    "name": "ac-node-size-f1",
+    "value": "76px"
+   },
+   {
+    "name": "ac-gap-tight",
+    "value": "8px"
+   },
+   {
+    "name": "ac-gap",
+    "value": "16px"
+   },
+   {
+    "name": "ac-gap-loose",
+    "value": "28px"
+   },
+   {
+    "name": "bp-mobile-portrait",
+    "value": "559px"
+   },
+   {
+    "name": "bp-mobile-landscape",
+    "value": "1023px"
+   },
+   {
+    "name": "bp-desktop",
+    "value": "1024px"
+   }
+  ]
+ },
+ "radius": {
+  "tokens": [
+   {
+    "name": "radius-xs",
+    "value": "4px"
+   },
+   {
+    "name": "radius-sm",
+    "value": "6px"
+   },
+   {
+    "name": "radius-md",
+    "value": "10px"
+   },
+   {
+    "name": "radius-lg",
+    "value": "14px"
+   },
+   {
+    "name": "radius-xl",
+    "value": "20px"
+   },
+   {
+    "name": "radius-pill",
+    "value": "999px"
+   },
+   {
+    "name": "ac-radius-sm",
+    "value": "10px"
+   },
+   {
+    "name": "ac-radius-md",
+    "value": "14px"
+   },
+   {
+    "name": "ac-radius-lg",
+    "value": "20px"
+   },
+   {
+    "name": "ac-radius-xl",
+    "value": "28px"
+   },
+   {
+    "name": "ac-radius-pill",
+    "value": "999px"
+   }
+  ]
+ },
+ "shadow": {
+  "tokens": [
+   {
+    "name": "shadow-xs",
+    "value": "0 1px 2px rgba(18, 40, 82, 0.06)"
+   },
+   {
+    "name": "shadow-sm",
+    "value": "0 1px 3px rgba(18, 40, 82, 0.08), 0 1px 2px rgba(18, 40, 82, 0.06)"
+   },
+   {
+    "name": "shadow-md",
+    "value": "0 4px 12px rgba(18, 40, 82, 0.10), 0 2px 4px rgba(18, 40, 82, 0.06)"
+   },
+   {
+    "name": "shadow-lg",
+    "value": "0 12px 28px rgba(18, 40, 82, 0.14), 0 4px 10px rgba(18, 40, 82, 0.08)"
+   },
+   {
+    "name": "shadow-focus",
+    "value": "0 0 0 3px rgba(18, 114, 194, 0.32)"
+   },
+   {
+    "name": "ac-shadow-panel",
+    "value": "0 10px 24px rgba(7, 11, 24, 0.55)"
+   },
+   {
+    "name": "ac-shadow-card",
+    "value": "0 4px 14px rgba(7, 11, 24, 0.45)"
+   },
+   {
+    "name": "ac-glow-disponivel",
+    "value": {
+     "light": "0 0 0 4px rgba(245, 195, 123, 0.22), 0 0 18px rgba(245, 195, 123, 0.35)",
+     "ac-f2": "0 0 0 3px rgba(245, 195, 123, 0.18)"
+    }
+   },
+   {
+    "name": "ac-glow-dominada",
+    "value": {
+     "light": "0 0 0 4px rgba(16, 156, 143, 0.20), 0 0 16px rgba(16, 156, 143, 0.32)",
+     "ac-f2": "0 0 0 3px rgba(16, 156, 143, 0.18)"
+    }
+   },
+   {
+    "name": "ac-glow-concluida",
+    "value": {
+     "light": "0 0 0 4px rgba(18, 114, 194, 0.20), 0 0 16px rgba(18, 114, 194, 0.32)",
+     "ac-f2": "0 0 0 3px rgba(18, 114, 194, 0.18)"
+    }
+   },
+   {
+    "name": "ac-glow-acerto",
+    "value": "0 0 0 4px rgba(92, 175, 78, 0.24), 0 0 20px rgba(92, 175, 78, 0.38)"
+   },
+   {
+    "name": "ac-ring-focus",
+    "value": "0 0 0 3px #0c1222, 0 0 0 6px #6cb2ec"
+   }
+  ]
+ },
+ "motion": {
+  "tokens": [
+   {
+    "name": "ease-standard",
+    "value": "cubic-bezier(0.4, 0, 0.2, 1)"
+   },
+   {
+    "name": "ease-out",
+    "value": "cubic-bezier(0.16, 1, 0.3, 1)"
+   },
+   {
+    "name": "ease-in",
+    "value": "cubic-bezier(0.4, 0, 1, 1)"
+   },
+   {
+    "name": "duration-fast",
+    "value": "120ms"
+   },
+   {
+    "name": "duration-base",
+    "value": "200ms"
+   },
+   {
+    "name": "duration-slow",
+    "value": "500ms"
+   },
+   {
+    "name": "ac-ease-pop",
+    "value": "cubic-bezier(0.34, 1.56, 0.64, 1)"
+   },
+   {
+    "name": "ac-ease-out",
+    "value": "cubic-bezier(0.16, 1, 0.3, 1)"
+   },
+   {
+    "name": "ac-dur-tap",
+    "value": "120ms"
+   },
+   {
+    "name": "ac-dur-feedback",
+    "value": "260ms"
+   },
+   {
+    "name": "ac-dur-reward",
+    "value": "700ms"
+   },
+   {
+    "name": "ac-dur-scene",
+    "value": "480ms"
+   }
+  ]
+ },
+ "fontWeight": {
+  "tokens": [
+   {
+    "name": "fw-light",
+    "value": "300"
+   },
+   {
+    "name": "fw-regular",
+    "value": "400"
+   },
+   {
+    "name": "fw-medium",
+    "value": "500"
+   },
+   {
+    "name": "fw-semibold",
+    "value": "600"
+   },
+   {
+    "name": "fw-bold",
+    "value": "700"
+   },
+   {
+    "name": "ac-fw-display",
+    "value": "700"
+   },
+   {
+    "name": "ac-fw-punch",
+    "value": "800"
+   }
+  ]
+ },
+ "letterSpacing": {
+  "tokens": [
+   {
+    "name": "tracking-tight",
+    "value": "-0.01em"
+   },
+   {
+    "name": "tracking-normal",
+    "value": "0"
+   }
+  ]
+ },
+ "other": {
+  "tokens": [
+   {
+    "name": "grid-columns",
+    "value": "12"
+   },
+   {
+    "name": "logo-clearspace",
+    "value": "1"
+   },
+   {
+    "name": "gradient-brand",
+    "value": "linear-gradient( 90deg, #f5c37b 0%, #f27fa2 16%, #9382c9 34%, #1272c2 54%, #109c8f 72%, #5caf4e 86%, #2fb5dd 100% )"
+   },
+   {
+    "name": "gradient-institutional",
+    "value": "linear-gradient(135deg, #122852 0%, #1272c2 100%)"
+   },
+   {
+    "name": "ac-scene-orbita",
+    "value": "radial-gradient(120% 90% at 18% 58%, #3a1b08 0%, #150c1c 42%, #070b18 100%)"
+   },
+   {
+    "name": "ac-scene-marte",
+    "value": "linear-gradient(180deg, #2a1608 0%, #7d3c12 58%, #b9641f 100%)"
+   },
+   {
+    "name": "ac-scene-crepusculo",
+    "value": "linear-gradient(180deg, #1b0d24 0%, #5b1733 62%, #8e2340 100%)"
+   },
+   {
+    "name": "ac-scene-hangar",
+    "value": "linear-gradient(180deg, #16305c 0%, #24406e 100%)"
+   },
+   {
+    "name": "ac-scene-oceano",
+    "value": "linear-gradient(180deg, #071d2c 0%, #0d4f5c 62%, #109c8f 100%)"
+   },
+   {
+    "name": "ac-xp-bar",
+    "value": "linear-gradient(90deg, #f5c37b 0%, #f27fa2 100%)"
+   },
+   {
+    "name": "ac-lh-display",
+    "value": "1.1"
+   },
+   {
+    "name": "ac-lh-body",
+    "value": "1.55"
+   },
+   {
+    "name": "ac-stroke",
+    "value": "2px"
+   },
+   {
+    "name": "ac-stroke-strong",
+    "value": "3px"
+   }
+  ]
+ }
+}
