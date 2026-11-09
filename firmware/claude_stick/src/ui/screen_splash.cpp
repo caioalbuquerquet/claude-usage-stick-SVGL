@@ -27,6 +27,7 @@ constexpr lv_opa_t DOT_OPA_MIN = 64;              // 25%
 // ~10% da largura do gradiente de cada lado). As linhas da faixa inclinam
 // 15° da vertical: x + tan(15°)·y = constante (o topo fica mais à direita).
 constexpr uint32_t C_SHINE = 0xe2f0ff;
+constexpr uint32_t SHINE_PASS_MS = 2000;          // uma passada da faixa
 constexpr int SHINE_PEAK = 217;                   // 85% de 255
 constexpr int SHINE_HW = 71;                      // meia largura, em px
 constexpr int SHINE_K256 = 69;                    // tan(15°) * 256
@@ -135,7 +136,10 @@ lv_opa_t dot_opa(int32_t t) {
 void frame(uint32_t elapsed) {
     if (elapsed > SPLASH_MS) elapsed = SPLASH_MS;
     if (s_logo && s_buf) {
-        int32_t e = ease((int32_t)(elapsed * LV_BEZIER_VAL_MAX / SPLASH_MS));
+        // Duas passadas de SHINE_PASS_MS (2 s) nos 4 s, pedido do dono; no
+        // fim a faixa fica fora do logo (posição final da 2ª passada).
+        uint32_t inPass = elapsed >= SPLASH_MS ? SHINE_PASS_MS : elapsed % SHINE_PASS_MS;
+        int32_t e = ease((int32_t)(inPass * LV_BEZIER_VAL_MAX / SHINE_PASS_MS));
         int c = SHINE_C0 + (SHINE_C1 - SHINE_C0) * e / LV_BEZIER_VAL_MAX;
         int x0, x1;
         band_cols(c, &x0, &x1);

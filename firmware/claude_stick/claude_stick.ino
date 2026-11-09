@@ -695,13 +695,27 @@ void setup() {
   poller_set_hooks(hooks);
   scheduler_set_moment_hook(show_moment);
 
-  // O autoConnect bloqueia o loop(): a animação da abertura só começa depois
-  // dele, e é a abertura que pede a primeira tela ao terminar.
   if (has_accounts()) {
-    // Tenta WiFi cedo (em paralelo o usuário digita o PIN)
-    g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS);
+    // WiFi em segundo plano: um RECONNECT na net_task (connectList, sem NVS)
+    // percorre as redes salvas enquanto a abertura anima e o usuário digita o
+    // PIN. Assim a animação começa já, sem esperar o autoConnect (até 8 s).
+    // O resultado chega por poller_apply_results(); antes do desbloqueio o
+    // agendador o ignora (não há ciclo aberto).
+    WiFiManager::SavedNet nets[MAX_SAVED_NETWORKS];
+    int n = g_wifi.copySaved(nets);
+    token_store_set_reconnect(nets, n);
+    memset(nets, 0, sizeof(nets));
+    if (n > 0) {
+      NetJob j = {};
+      j.type = JOB_RECONNECT;
+      j.slot = -1;
+      j.modelIdx = -1;
+      poller_enqueue(j);
+    }
     screen_splash_start(ST_PIN);
   } else {
+    // Onboarding: a próxima tela depende de o WiFi conectar, então este
+    // autoConnect continua bloqueante (a abertura fica parada até ele).
     g_onboarding = true;
     // Se já há WiFi salvo (reboot no meio do onboarding), pula direto p/ o token
     screen_splash_start(g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS) ? ST_TOKEN : ST_WIFI);
