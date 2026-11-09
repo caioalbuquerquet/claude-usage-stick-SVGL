@@ -51,10 +51,10 @@ bool web_running() { return g_web != nullptr; }
 static bool g_mdnsUp = false;
 void ensure_mdns() {
   if (g_mdnsUp || !g_wifi.isConnected()) return;
-  if (MDNS.begin("claude-stick")) {
+  if (MDNS.begin(DEVICE_HOST)) {
     MDNS.addService("http", "tcp", 80);
     g_mdnsUp = true;
-    Serial.println("[MDNS] claude-stick.local");
+    Serial.println("[MDNS] " DEVICE_HOST ".local");
   }
 }
 
@@ -302,8 +302,8 @@ static void handleTokensPost() {
 static void handleInfo() {
   String h = F("<!doctype html><html lang=pt><head><meta charset=utf-8>"
                "<meta name=viewport content='width=device-width,initial-scale=1'>"
-               "<title>Claude Usage Stick</title><style>" WEB_CSS "</style></head><body><div class=card>"
-               "<h1>" WEB_SPARK " Claude Usage Stick</h1>"
+               "<title>" DEVICE_NAME "</title><style>" WEB_CSS "</style></head><body><div class=card>"
+               "<h1>" WEB_SPARK " " DEVICE_NAME "</h1>"
                "<p>Device online. Endpoints: <code>GET /window[?account=rotulo]</code> (janela atual) e "
                "<code>POST /tokens</code> (bridge de tokens por conta — ver tools/token_bridge.py). "
                "Para adicionar ou trocar uma conta, abra a tela de token no aparelho e use <a href='/'>/</a>.</p>"

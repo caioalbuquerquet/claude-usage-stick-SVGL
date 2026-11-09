@@ -9,6 +9,13 @@
 // ── Firmware ─────────────────────────────────────────────
 #define FW_VERSION              "3.0"
 
+// ── Nome da placa ────────────────────────────────────────
+// Nome exibido (tela Sobre) e nome de rede (mDNS + hostname do DHCP). O nome de
+// rede não aceita espaço nem acento; precisa ser único na rede (havia outra
+// placa respondendo como claude-stick.local).
+#define DEVICE_NAME             "Caio THEP Usage Monitor"
+#define DEVICE_HOST             "caio-thep-usage-monitor"
+
 // ── Display QSPI (AXS15231B) ─────────────────────────────
 #define TFT_CS    45
 #define TFT_SCK   47

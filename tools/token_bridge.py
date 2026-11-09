@@ -164,8 +164,8 @@ def push(host: str, account=None, projects_dir=None) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--host", default="claude-stick.local",
-                    help="hostname/IP do gadget (default: claude-stick.local)")
+    ap.add_argument("--host", default="caio-thep-usage-monitor.local",
+                    help="hostname/IP do gadget (default: caio-thep-usage-monitor.local)")
     ap.add_argument("--loop", type=int, default=0, metavar="SEG",
                     help="repetir a cada SEG segundos (0 = um envio)")
     ap.add_argument("--account", default=None, metavar="ROTULO",

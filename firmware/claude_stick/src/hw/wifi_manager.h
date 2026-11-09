@@ -26,6 +26,7 @@ public:
     bool begin() {
         _prefs.begin("wifi", false);
         _loadAll();
+        WiFi.setHostname(DEVICE_HOST);   // antes do mode/begin, vale para o DHCP
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
         return true;

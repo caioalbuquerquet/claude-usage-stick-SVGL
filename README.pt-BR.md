@@ -388,7 +388,7 @@ nos **transcripts locais do Claude Code** (`<pasta de config>/projects/**/*.json
 padrão).
 
 O [`tools/token_bridge.py`](tools/token_bridge.py) (só stdlib) fecha essa lacuna: ele pergunta ao
-device qual é a janela atual da conta (`GET http://claude-stick.local/window?account=<rótulo>`),
+device qual é a janela atual da conta (`GET http://caio-thep-usage-monitor.local/window?account=<rótulo>`),
 soma as entradas `usage` dos transcripts desde o início da janela (deduplicadas por id de mensagem,
 procurando em todas as subpastas de `projects/`) e devolve o total (`POST /tokens`). A tela inicial
 de 1 conta e a `/janela` passam a mostrar *"tokens: 1.2M entrada · 88k saída"*. A contagem some
@@ -403,7 +403,7 @@ python3 tools/token_bridge.py --loop 120                   # continua enviando a
 python3 tools/token_bridge.py --host 192.168.0.42          # se o mDNS não resolver
 ```
 
-O device se anuncia por mDNS como **`claude-stick.local`** assim que entra no WiFi.
+O device se anuncia por mDNS como **`caio-thep-usage-monitor.local`** assim que entra no WiFi.
 
 **Contrato do device (v3):**
 

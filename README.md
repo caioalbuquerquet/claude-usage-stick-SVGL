@@ -379,7 +379,7 @@ carry utilization percentages, and `/api/oauth/usage` requires the `user:profile
 the **local Claude Code transcripts** (`<config dir>/projects/**/*.jsonl`, `~/.claude` by default).
 
 [`tools/token_bridge.py`](tools/token_bridge.py) (stdlib only) closes that gap: it asks the device
-for the account's current window (`GET http://claude-stick.local/window?account=<label>`), sums the
+for the account's current window (`GET http://caio-thep-usage-monitor.local/window?account=<label>`), sums the
 transcript `usage` entries since the window start (deduped by message id, searching every
 subfolder of `projects/`) and pushes them back (`POST /tokens`). The single-account home screen and
 `/janela` then show *"tokens: 1.2M entrada · 88k saída"*. The count disappears when it goes stale
@@ -394,7 +394,7 @@ python3 tools/token_bridge.py --loop 120                   # keep pushing every 
 python3 tools/token_bridge.py --host 192.168.0.42          # if mDNS doesn't resolve
 ```
 
-The device advertises itself via mDNS as **`claude-stick.local`** once it is on WiFi.
+The device advertises itself via mDNS as **`caio-thep-usage-monitor.local`** once it is on WiFi.
 
 **Device contract (v3):**
 
