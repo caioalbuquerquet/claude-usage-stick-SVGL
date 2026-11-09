@@ -51,8 +51,8 @@ const LayoutSpec SPEC[4] = {
   {272, 214, 16, 18, FONT_13, 10, 41, RESET_IN_AT, &T::CARD_RESET, nullptr, &T::CARD_RESET},
   // 2 colunas
   {210, 214, 16, 14, FONT_13, 8, 31, RESET_IN_AT, &T::CARD_RESET, &T::CARD_WEEK, &T::CARD_RESET},
-  // 3 colunas
-  {138, 214, 11, 9, FONT_11, 0, 20, RESET_IN_AT, nullptr, &T::CARD_WEEK_S, &T::CARD_RESET_S},
+  // 3 colunas: rótulo de 10 para caber com a marca de 8 (tools/gen_mockups.py)
+  {138, 214, 10, 9, FONT_11, 0, 20, RESET_IN_AT, nullptr, &T::CARD_WEEK_S, &T::CARD_RESET_S},
   // 2 x 2
   {210, 103, 14, 14, FONT_11, 0, 31, RESET_AT, &T::CARD_RESET_S, &T::CARD_WEEK_XS, nullptr},
 };
