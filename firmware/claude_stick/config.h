@@ -85,7 +85,7 @@
 // relógio do rodapé), rot_max<1 ms, send_max=37 ms. Um degrau do pulso só envia
 // ~112 linhas, então o pulso volta ao ciclo de 1,6 s aprovado.
 #define DOT_PULSE_STEP_MS       400
-// Pipeline do display (spike, item 34). Padrão: FULL, rotação pixel a pixel.
+// Pipeline do display (spike, item 34). Padrão: DISP_BANDS=1 + DISP_ROT_FAST=1 (faixas de linhas nativas a partir da linha 0 e rotação em blocos).
 // Para testar sem editar o arquivo:
 //   THEP_FLAGS="-DDISP_ROT_FAST=1" ./build.sh upload-dev
 //   THEP_FLAGS="-DDISP_BANDS=1 -DDISP_ROT_FAST=1" ./build.sh upload-dev
