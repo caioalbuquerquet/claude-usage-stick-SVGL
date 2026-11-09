@@ -3,8 +3,9 @@
 // status.claude.com. Substitui os mascotes Clawd da v2.3.
 //
 // A sonda de cada modelo vem do USAGE da conta em foco (rodízio no
-// agendador), por isso a seção mostra o rótulo dela; tocar na seção passa
-// para a próxima conta (Technical Plan §3).
+// agendador) e fica guardada por conta (AccountState::probe): a seção mostra
+// o rótulo da conta em foco e só as sondas feitas com ela ("—" até sondar);
+// tocar na seção passa para a próxima conta (Technical Plan §3).
 #include <Arduino.h>
 #include <string.h>
 #include <stdio.h>
@@ -55,10 +56,13 @@ void section_click_cb(lv_event_t* e) {
 
 void update() {
   if (!s_built) return;
+  const int a = g_accts.active;
+  const bool okSlot = a >= 0 && a < ACCT_MAX && g_accts.used[a];
   for (int i = 0; i < NMODELS; i++) {
     char t[24];
     Tone tone = TONE_DIM;
-    model_status_text(g_models[i].pr.code, g_models[i].pr.ms, g_lang, t, sizeof(t), &tone);
+    ProbeResult pr = okSlot ? acct[a].probe[i].pr : ProbeResult{0, 0};
+    model_status_text(pr.code, pr.ms, g_lang, t, sizeof(t), &tone);
     lbl_set(s_status[i], t, tone_color(tone));
   }
   // status.claude.com: mesma regra do dialog de incidente (incident_sync)

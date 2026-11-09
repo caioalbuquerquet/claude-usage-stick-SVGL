@@ -21,7 +21,8 @@ enum JobType : uint8_t { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT };
 // Job, sem token. gen é uint16_t (token_store); AccountState::gen (uint32_t)
 // entra truncado (gen & 0xFFFF) dos dois lados.
 //   USAGE:     slot e gen da conta; model = modelo da consulta; modelIdx =
-//              índice em g_models[] quando é a sonda da conta em foco, -1 senão.
+//              índice em g_models[] quando é a sonda da conta em foco, -1 senão
+//              (o resultado vai para acct[slot].probe[modelIdx]).
 //   VALIDATE:  slot = g_tokenTargetSlot (só log), gen = web_token_seq().
 //   STATUS, RECONNECT: slot = -1, gen = 0.
 // cycle: id do ciclo do agendador que mandou o job (logic/cycle.h); 0 = fora

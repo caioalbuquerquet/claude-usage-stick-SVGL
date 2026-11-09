@@ -198,10 +198,11 @@ void apply_one(const NetResult& r) {
                               (unsigned)r.gen, (unsigned)(uint16_t)a.gen);
                 break;
             }
-            if (r.modelIdx >= 0 && r.modelIdx < NMODELS) {
-                g_models[r.modelIdx].pr.code = r.probeHttp;
-                g_models[r.modelIdx].pr.ms = r.probeMs;
-                g_models[r.modelIdx].atMs = millis();
+            if (r.modelIdx >= 0 && r.modelIdx < NMODELS) {   // sonda desta conta
+                ModelProbe& p = a.probe[r.modelIdx];
+                p.pr.code = r.probeHttp;
+                p.pr.ms = r.probeMs;
+                p.atMs = millis();
             }
             ThrHit hit = {-1, 0};
             acct_apply_result(r, (uint32_t)g_pollSec, g_tzOffset * 3600, &hit);

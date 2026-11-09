@@ -10,10 +10,10 @@
 AccountState* acct = nullptr;
 
 ModelInfo g_models[NMODELS] = {
-  {"Haiku",  "claude-haiku-4-5-20251001", {0, 0}, 0},
-  {"Sonnet", "claude-sonnet-5",           {0, 0}, 0},
-  {"Opus",   "claude-opus-4-8",           {0, 0}, 0},
-  {"Fable",  "claude-fable-5",            {0, 0}, 0},
+  {"Haiku",  "claude-haiku-4-5-20251001"},
+  {"Sonnet", "claude-sonnet-5"},
+  {"Opus",   "claude-opus-4-8"},
+  {"Fable",  "claude-fable-5"},
 };
 ModelStatus g_status = {true, true, true, true, false, SEV_NONE, {{0}, {0}, {0}, {0}}};
 
@@ -47,6 +47,7 @@ void acct_reset_runtime(int slot) {
   a.fails = 0;
   a.backoffCycles = 0;
   memset(&a.thr, 0, sizeof(a.thr));
+  memset(a.probe, 0, sizeof(a.probe));   // token novo: sonda de novo
 }
 
 bool acct_apply_result(const NetResult& r, uint32_t intervalSec, int32_t tzOffsetSec,

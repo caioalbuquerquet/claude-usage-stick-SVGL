@@ -19,6 +19,12 @@ struct TokenStats { long long tin, tout, cache; int sessions; uint32_t atMs; };
 #define TOK_FRESH_MS (15UL * 60UL * 1000UL)
 
 // ---- Limiares (momentos 25/50/70/100%) já disparados por janela ----
+// ---- Sonda de cada modelo (rodízio no USAGE da conta em foco) ----
+// Por conta: /modelos mostra só o que foi sondado com o token da conta do
+// título. pr.code == 0: nunca sondado com esta conta ("—").
+#define NMODELS 4
+struct ModelProbe { ProbeResult pr; uint32_t atMs; };
+
 struct ThrState {
   uint8_t fired[2];   // bits já disparados por janela (0 = 5h, 1 = 7d)
   float prev[2];      // última % vista por janela
@@ -52,12 +58,13 @@ struct AccountState {
 
   ThrState thr;
   TokenStats tok;
+  ModelProbe probe[NMODELS];     // índice = g_models[]
 };
 
 // ---- Modelos sondados e status.claude.com (fase 2: vieram do .ino) ----
-// A sonda de cada modelo vem do USAGE da conta em foco (rodízio no agendador).
-#define NMODELS 4
-struct ModelInfo { const char *name; const char *id; ProbeResult pr; uint32_t atMs; };
+// A sonda de cada modelo vem do USAGE da conta em foco (rodízio no agendador)
+// e fica em AccountState::probe da conta que sondou.
+struct ModelInfo { const char *name; const char *id; };
 extern ModelInfo g_models[NMODELS];
 extern ModelStatus g_status;   // última leitura boa do status.claude.com
 
@@ -85,7 +92,7 @@ struct ThrHit { int8_t win; uint8_t thr; };
 //   FC_AUTH:  fails++, backoffCycles = auth_backoff_cycles(fails, intervalo);
 //   outras:   fails = backoffCycles = 0.
 // Em todas: lastClass, lastHttp, lastTryEndEpoch. A sonda do modelo
-// (g_models) fica com quem chama (poller_apply_results).
+// (AccountState::probe) fica com quem chama (poller_apply_results).
 struct NetResult;
 bool acct_apply_result(const NetResult& r, uint32_t intervalSec, int32_t tzOffsetSec,
                        ThrHit* hit);
