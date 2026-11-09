@@ -45,6 +45,7 @@
 #include "ui/overlay_menu.h"
 #include "ui/screens.h"
 #include "hw/frame_stats.h"
+#include "logic/rot270.h"
 #include "ui/i18n.h"
 #include "ui/theme.h"         // fase 3: tema THEP (shell e menu; as telas ainda usam a paleta abaixo)
 #include <mbedtls/platform_util.h>
@@ -145,34 +146,71 @@ static void incident_sync();
 // ============================================================
 // Pipeline de display/touch (validado no bring-up)
 // ============================================================
-// Spike da fase 3 (item 34): o tempo de cada flush vai para hw/frame_stats.
-#if DISP_PARTIAL
-// Modo parcial: o LVGL entrega só as áreas invalidadas (buffer de 1/10 da
-// tela). Cada área é girada para o framebuffer do Canvas (que continua sendo a
-// imagem inteira da tela) e, na última área do quadro, só as linhas nativas
-// tocadas (retrato 320 de largura) vão ao AXS15231B. Uma linha nativa y é a
-// coluna de paisagem x = 479 - y, então o ponto do cabeçalho vira uma faixa
-// de ~10 linhas nativas inteiras.
+// Spike da fase 3 (item 34): o tempo de cada flush vai para hw/frame_stats,
+// separado em rotação (rot) e envio (send). Flags em config.h:
+//   DISP_ROT_FAST=1  rotação em blocos (src/logic/rot270) no lugar da pixel a pixel;
+//   DISP_BANDS=1     PARTIAL + envio só do prefixo de linhas nativas tocado;
+//   DISP_BANDS=2     idem, mas com a janela de linhas (RASET) de verdade: só
+//                    experimento, para confirmar que o painel ignora o RASET.
+#define DISP_NW SCREEN_HEIGHT   // largura nativa (320) = altura da paisagem
+#if DISP_BANDS
+// Modo de faixas. O LVGL entrega só as áreas invalidadas; cada uma é girada
+// para o framebuffer do Canvas (a imagem inteira da tela, em PSRAM, que
+// guarda o que não mudou). No fim do quadro vai ao painel um bloco de linhas
+// nativas INTEIRAS (CASET sempre 0..319).
+//
+// Mapeamento (detalhe em src/logic/rot270.h): o pixel de paisagem (lx, ly)
+// vai para a linha nativa r = 479 - lx, coluna ly. Uma área de paisagem
+// [x1..x2] x [y1..y2] toca então as linhas nativas [479-x2 .. 479-x1],
+// qualquer que seja o y; a borda direita da paisagem é a linha nativa 0. Ex.:
+// o ponto do cabeçalho (x ~368..378) são as linhas nativas ~101..111.
+//
+// Por que um prefixo [0 .. r1] e não a faixa [r0 .. r1]: o PARTIAL anterior
+// mandava exatamente a faixa (CASET 0..319 + RASET r0..r1) e o conteúdo saiu
+// deslocado na horizontal. Na paisagem, deslocamento horizontal = linha
+// nativa errada. A explicação mais provável: o AXS15231B em QSPI ignora o
+// RASET (não o CASET) e o RAMWR recomeça na linha 0 (a faixa caiu na borda
+// direita da paisagem). DISP_BANDS=2 repete aquele envio para confirmar na
+// placa. É o que o driver da Espressif (esp_lcd_axs15231b) assume: ele nem
+// manda RASET em QSPI: usa RAMWR (0x2C) quando y_start == 0 e RAMWRC (0x3C,
+// continuar) nas faixas seguintes, que precisam vir em ordem. Então a única
+// faixa endereçável é a que começa na linha 0: mandamos as linhas 0..r1, com
+// r1 = 479 - (menor x1 do quadro). O RASET (0, r1) que o Arduino_GFX manda
+// é inofensivo: começa em 0, valha ou não. O ganho depende de quão à direita
+// está o que mudou (o ponto do cabeçalho: 112 de 480 linhas).
 static Arduino_GFX *g_panel = nullptr;      // saída do Canvas (o AXS15231B)
-static int16_t g_bandY0 = SCREEN_WIDTH, g_bandY1 = -1;
+static int16_t g_bandR0 = SCREEN_WIDTH, g_bandR1 = -1;   // linhas nativas tocadas no quadro
 static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   uint32_t t0 = micros();
   const int w = lv_area_get_width(area);
-  const uint16_t *src = (const uint16_t *)px_map;
-  for (int ly = area->y1; ly <= area->y2; ly++) {
-    const uint16_t *row = src + (ly - area->y1) * w;
-    for (int lx = area->x1; lx <= area->x2; lx++)
-      canvas_fb[(SCREEN_WIDTH - 1 - lx) * SCREEN_HEIGHT + ly] = row[lx - area->x1];
+  const int stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB565) / 2;
+#if DISP_ROT_FAST
+  rot270_fast((const uint16_t *)px_map, stride, area->x1, area->y1, area->x2, area->y2,
+              canvas_fb, SCREEN_WIDTH, DISP_NW);
+#else
+  rot270_naive((const uint16_t *)px_map, stride, area->x1, area->y1, area->x2, area->y2,
+               canvas_fb, SCREEN_WIDTH, DISP_NW);
+#endif
+  int r0, r1;
+  rot270_rows(area->x1, area->x2, SCREEN_WIDTH, &r0, &r1);
+  if (r0 < g_bandR0) g_bandR0 = r0;
+  if (r1 > g_bandR1) g_bandR1 = r1;
+  uint32_t t1 = micros();
+  frame_rotate_add(t1 - t0);
+  if (lv_display_flush_is_last(disp) && g_bandR1 >= g_bandR0) {
+#if DISP_BANDS == 2
+    const int16_t y0 = g_bandR0;            // experimento: faixa exata via RASET
+#else
+    const int16_t y0 = 0;                   // prefixo: o RAMWR começa na linha 0
+#endif
+    const int16_t rows = g_bandR1 - y0 + 1;
+    g_panel->draw16bitRGBBitmap(0, y0, canvas_fb + y0 * DISP_NW, DISP_NW, rows);
+    g_bandR0 = SCREEN_WIDTH; g_bandR1 = -1;
+    uint32_t t2 = micros();
+    frame_send_add(t2 - t1, rows);
+    t1 = t2;
   }
-  int16_t y0 = SCREEN_WIDTH - 1 - area->x2, y1 = SCREEN_WIDTH - 1 - area->x1;
-  if (y0 < g_bandY0) g_bandY0 = y0;
-  if (y1 > g_bandY1) g_bandY1 = y1;
-  if (lv_display_flush_is_last(disp) && g_bandY1 >= g_bandY0) {
-    g_panel->draw16bitRGBBitmap(0, g_bandY0, canvas_fb + g_bandY0 * SCREEN_HEIGHT,
-                                SCREEN_HEIGHT, g_bandY1 - g_bandY0 + 1);
-    g_bandY0 = SCREEN_WIDTH; g_bandY1 = -1;
-  }
-  frame_flush_add(micros() - t0);
+  frame_flush_add(t1 - t0);
   lv_display_flush_ready(disp);
 }
 #else
@@ -181,13 +219,22 @@ static void disp_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
   (void)area;
   uint32_t t0 = micros();
   uint16_t *src = (uint16_t *)px_map;
+#if DISP_ROT_FAST
+  rot270_fast(src, SCREEN_WIDTH, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
+              canvas_fb, SCREEN_WIDTH, DISP_NW);
+#else
   for (int ly = 0; ly < SCREEN_HEIGHT; ly++) {
     uint16_t *src_row = src + ly * SCREEN_WIDTH;
     for (int lx = 0; lx < SCREEN_WIDTH; lx++)
       canvas_fb[(479 - lx) * 320 + ly] = src_row[lx];
   }
+#endif
+  uint32_t t1 = micros();
   gfx->flush();
-  frame_flush_add(micros() - t0);
+  uint32_t t2 = micros();
+  frame_rotate_add(t1 - t0);
+  frame_send_add(t2 - t1, SCREEN_WIDTH);
+  frame_flush_add(t2 - t0);
   lv_display_flush_ready(disp);
 }
 #endif
@@ -1927,15 +1974,21 @@ void setup() {
   lv_init();
   theme_init();   // só inicializa os estilos; nenhuma tela usa ainda
   lv_tick_set_cb([]() -> uint32_t { return millis(); });
-#if DISP_PARTIAL
-  g_panel = g;
-  uint32_t bufSize = SCREEN_WIDTH * (SCREEN_HEIGHT / 10) * sizeof(lv_color_t);
-  const lv_display_render_mode_t renderMode = LV_DISPLAY_RENDER_MODE_PARTIAL;
-  frame_set_mode("partial");
-#else
+  // Buffer de tela cheia nos dois modos: no de faixas cada área invalidada é
+  // desenhada inteira de uma vez (sem fatiar e redesenhar por pedaço).
   uint32_t bufSize = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color_t);
+#if DISP_BANDS
+  g_panel = g;
+  const lv_display_render_mode_t renderMode = LV_DISPLAY_RENDER_MODE_PARTIAL;
+#else
   const lv_display_render_mode_t renderMode = LV_DISPLAY_RENDER_MODE_FULL;
-  frame_set_mode("full");
+#endif
+#if DISP_BANDS == 2
+  frame_set_mode(DISP_ROT_FAST ? "bands-raset+rotfast" : "bands-raset");
+#elif DISP_BANDS
+  frame_set_mode(DISP_ROT_FAST ? "bands+rotfast" : "bands");
+#else
+  frame_set_mode(DISP_ROT_FAST ? "full+rotfast" : "full");
 #endif
   lv_color_t *buf = (lv_color_t *)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) { Serial.println("FATAL PSRAM"); while (1) delay(1000); }

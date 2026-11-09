@@ -76,16 +76,33 @@
 // DOT_PULSE_STEP_MS (ciclo de 1,6 s). Fallback do spike se o quadro passar de
 // 40 ms e o modo parcial não resolver: 1000 (1 troca por segundo).
 // Spike medido na placa (2026-11-09): FULL deu frame_max=109 ms / flush_max=65 ms
-// com degraus de 400 ms; PARTIAL desenha deslocado na horizontal (o AXS15231B
-// não respeita a janela de coluna). Fica FULL com 1 troca por segundo.
+// com degraus de 400 ms; o PARTIAL de então (faixa exata de linhas nativas,
+// CASET 0..319 + RASET) desenhou deslocado na horizontal: na paisagem isso é
+// linha nativa errada, ou seja, o AXS15231B em QSPI não respeita a janela de
+// LINHAS (RASET). Fica FULL com 1 troca por segundo.
 #define DOT_PULSE_STEP_MS       1000
-// Spike: 0 = LV_DISPLAY_RENDER_MODE_FULL (padrão, buffer de tela cheia e envio
-// dos 480x320 a cada quadro); 1 = PARTIAL (buffer de 1/10 da tela e envio só
-// das linhas nativas tocadas). Para testar sem editar o arquivo:
-//   THEP_FLAGS=-DDISP_PARTIAL=1 ./build.sh upload-dev
-// Não usar PARTIAL neste painel: a gravação parcial sai deslocada (ver acima).
-#ifndef DISP_PARTIAL
-#define DISP_PARTIAL            0
+// Pipeline do display (spike, item 34). Padrão: FULL, rotação pixel a pixel.
+// Para testar sem editar o arquivo:
+//   THEP_FLAGS="-DDISP_ROT_FAST=1" ./build.sh upload-dev
+//   THEP_FLAGS="-DDISP_BANDS=1 -DDISP_ROT_FAST=1" ./build.sh upload-dev
+// DISP_ROT_FAST: 1 = rotação de 270° em blocos 16x16 (src/logic/rot270),
+//   mesma imagem, menos tempo no flush.
+// DISP_BANDS: 0 = FULL (480x320 inteiro a cada quadro); 1 = PARTIAL e envio
+//   das linhas nativas 0..r1 (o prefixo que cobre o que mudou, ver o
+//   disp_flush_cb no .ino); 2 = experimento com a faixa exata via RASET,
+//   espera-se o mesmo deslocamento do PARTIAL antigo.
+// Rotação pelo painel (MADCTL MV, "DISP_ROT_HW") não existe de propósito: o
+// AXS15231B em QSPI só espelha (MX/MY); troca de eixos (MV) não funciona
+// nele (relatos ESPHome/LVGL/esp-iot-solution), e o bring-up chegou à
+// rotação por software pelo mesmo motivo.
+#ifdef DISP_PARTIAL
+#error "DISP_PARTIAL saiu: use DISP_BANDS=1 (ou DISP_BANDS=2 para repetir o envio com RASET)"
+#endif
+#ifndef DISP_ROT_FAST
+#define DISP_ROT_FAST           0
+#endif
+#ifndef DISP_BANDS
+#define DISP_BANDS              0
 #endif
 
 // ── NVS ──────────────────────────────────────────────────
