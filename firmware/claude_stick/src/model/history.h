@@ -4,10 +4,10 @@
 // passa para o AccountState, com assinaturas por conta.
 #include <stdint.h>
 #include <stddef.h>
+#include "logic/sample.h"          // HIST_MAX, Sample
+#include "model/account_state.h"   // NDAYS, DayHeat
 
 // ---- Histórico (ring buffer; persistido em LittleFS) ----
-#define HIST_MAX 160
-struct Sample { uint32_t t; uint8_t h5; uint8_t d7; };   // t = epoch (0 = relógio não sincronizado)
 extern Sample g_hist[HIST_MAX];
 extern int g_histN;
 extern int g_histHead;
@@ -15,8 +15,6 @@ extern float g_hourBurn[24];   // consumo por hora do dia (todo o tempo)
 extern float g_lastH5;         // última utilização 5h (delta do heatmap)
 
 // ---- Heatmap por dia (para o filtro hoje/7d/30d) ----
-#define NDAYS 31
-struct DayHeat { uint32_t day; float burn[24]; };   // day = dias locais desde epoch
 extern DayHeat g_days[NDAYS];
 extern int g_dayN;
 

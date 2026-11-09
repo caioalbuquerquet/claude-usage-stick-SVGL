@@ -1347,7 +1347,6 @@ static void heat_redraw() {
 // + medidor acendendo. Dispara ao cruzar o limiar; toque dispensa.
 // Animação 100% procedural (moment_tick no loop), sem lv_anim pendurado.
 // ============================================================
-static const uint8_t THR[4] = {25, 50, 70, 100};
 struct MomentUI {
   lv_obj_t *scrim, *box, *img, *pct, *seg[NSEG];
   lv_obj_t *lid[2], *drop[2], *ring, *xline[4];
@@ -2415,6 +2414,7 @@ void setup() {
   uint32_t bufSize = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color_t);
   lv_color_t *buf = (lv_color_t *)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!buf) { Serial.println("FATAL PSRAM"); while (1) delay(1000); }
+  if (!acct_init()) { Serial.println("FATAL PSRAM (acct)"); while (1) delay(1000); }
   lv_display_t *disp = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   lv_display_set_flush_cb(disp, disp_flush_cb);
   lv_display_set_buffers(disp, buf, NULL, bufSize, LV_DISPLAY_RENDER_MODE_FULL);

@@ -1,19 +1,81 @@
 #pragma once
-// Estado por conta. Fase 0: só recebe as globais da conta ativa, com o mesmo
-// comportamento da v2.3, declaradas extern aqui até a fase 1 (AccountState).
+// Estado por conta (Technical Plan §3). Fase 1: AccountState[] é a fonte única
+// dos dados de cada conta. O slot salvo e o rótulo NÃO são copiados aqui: a
+// fonte é g_accts.used[slot] / g_accts.label[slot] (model/accounts.h).
+// Na fase 1 a tela ainda mostra só a conta em foco (g_accts.active).
 #include <stdint.h>
 #include "logic/fetch_class.h"
+#include "logic/sample.h"
 #include "net/api.h"
+#include "model/accounts.h"   // ACCT_MAX
 
-// ---- Dados de uso da conta ativa ----
-extern UsageData g_usage;
+// ---- Heatmap por dia (para o filtro hoje/7d/30d) ----
+#define NDAYS 31
+struct DayHeat { uint32_t day; float burn[24]; };   // day = dias locais desde epoch
 
 // ---- Tokens por sessao (vindos do bridge via POST /tokens) ----
 struct TokenStats { long long tin, tout, cache; int sessions; uint32_t atMs; };
-extern TokenStats g_tok;
 #define TOK_FRESH_MS (15UL * 60UL * 1000UL)
 
 // ---- Limiares (momentos 25/50/70/100%) já disparados por janela ----
-extern uint8_t g_thrFired[2];   // bits já disparados por janela
+struct ThrState {
+  uint8_t fired[2];   // bits já disparados por janela (0 = 5h, 1 = 7d)
+  float prev[2];      // última % vista por janela
+  bool base;          // baseline já feita (1º fetch não dispara)
+};
+
+struct AccountState {
+  uint32_t gen;                  // geração (resultados com gen velho são descartados, fase 2)
+  bool keyOk;                    // o token deste slot decifrou
+
+  UsageData usage;               // último UsageData bom
+  uint32_t usageAtEpoch;         // quando chegou (0 = nenhum ainda)
+
+  uint32_t lastTryEndEpoch;      // resultado da última tentativa
+  FetchClass lastClass;
+  int16_t lastHttp;
+
+  uint8_t fails;                 // falhas AUTH seguidas
+  uint8_t backoffCycles;         // espera atual
+
+  uint32_t lastSaveEpoch;        // regra de gravação do histórico (fase 2)
+  uint32_t lastSavedReset;
+
+  // Mesmo conteúdo do HistFileV2 (model/history.cpp)
+  Sample hist[HIST_MAX];
+  int histN, histHead;
+  float hourBurn[24];            // consumo por hora do dia (todo o tempo)
+  float lastH5;                  // última utilização 5h (delta do heatmap)
+  DayHeat days[NDAYS];
+  int dayN;
+
+  ThrState thr;
+  TokenStats tok;
+};
+
+// ACCT_MAX registros em PSRAM, alocados por acct_init(). Só o loop() mexe.
+extern AccountState* acct;
+
+// Aloca acct[] em PSRAM, zerado. Devolve false se a alocação falhar.
+bool acct_init();
+void acct_bump_gen(int slot);
+// Zera o registro preservando o gen (slot reaproveitado continua com gen maior).
+void acct_clear(int slot);
+// Volta a conta a "pendente" sem mexer no histórico.
+void acct_reset_runtime(int slot);
+
+// ---- Limiares ----
+extern const uint8_t THR[4];
+struct ThrHit { int8_t win; uint8_t thr; };
+// Detecta cruzamento de limiar após cada fetch. Baseline no 1º fetch (não
+// dispara pelo que já estava acima); zera quando a janela reseta (queda >15pp).
+// Devolve {win, thr} do cruzamento ou {-1, 0}. Se as duas janelas cruzam na
+// mesma consulta, vale o maior limiar; em empate, a de 5h.
+ThrHit check_thresholds(AccountState& a);
+
+// ---- Globais temporárias da conta ativa (fase 0), removidas no item 14 ----
+extern UsageData g_usage;
+extern TokenStats g_tok;
+extern uint8_t g_thrFired[2];
 extern float g_thrPrev[2];
 extern bool g_thrBase;
