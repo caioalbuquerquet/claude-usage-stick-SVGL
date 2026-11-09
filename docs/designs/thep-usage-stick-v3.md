@@ -955,7 +955,7 @@ Todos os caminhos são relativos à raiz do repositório. Os arquivos novos de f
         *   `pin_submit` (ino:476): removida. Depois do desbloqueio, quem reconecta é o agendador, com `RECONNECT`;
         *   `bg_refresh` (ino:2709): removida junto com `bg_refresh` (item 24);
         *   `setup()` (ino:2790 e :2795): mantidas. Elas rodam antes de existir qualquer job, no contexto do `loop()`, que é dono do NVS.
-    *   O WiFi do onboarding e a tela de WiFi da sessão continuam chamando `connectTo()` no `loop()`. No onboarding, o agendador ainda não roda. Na sessão, a tela espera `poller_idle()` (item 18) antes de mexer no rádio.
+    *   O WiFi do onboarding e a tela de WiFi da sessão fazem o scan assíncrono no `loop()` (`scanStart`/`scanPoll`) e conectam pelo job `WIFI_JOIN` da `net_task`; o `loop()` grava a rede no NVS quando o resultado chega. As duas telas (inclusive o `ST_WIFI` depois do Apagar tudo) pausam o agendador e esperam `poller_idle()` (item 18) antes de mexer no rádio.
 
 #### 18. `firmware/claude_stick/src/net/poller.{h,cpp}` (Create)
 
@@ -963,7 +963,7 @@ Todos os caminhos são relativos à raiz do repositório. Os arquivos novos de f
 *   **Proposed Changes**:
     *   `void poller_start()` cria a `net_task` com `xTaskCreatePinnedToCore` (core `NET_TASK_CORE`, stack `NET_TASK_STACK`, prioridade 1), uma `jobQ` (8 itens) e uma `resQ` (8 itens). É chamada em `setup()` (item 6, passo 1).
     *   `TaskHandle_t poller_task_handle()`, para o `/health`.
-    *   **Job, sem token:** `struct NetJob { JobType type; int8_t slot; uint16_t gen; int8_t modelIdx; char model[48]; }`, com `JobType { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT }`. `modelIdx` é o índice em `g_models[]` (item 3) quando o job é a sonda da conta em foco, e −1 nos outros casos.
+    *   **Job, sem token:** `struct NetJob { JobType type; int8_t slot; uint16_t gen; int8_t modelIdx; uint16_t cycle; char model[48]; }`, com `JobType { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT, JOB_WIFI_JOIN }`. `cycle` é o id do ciclo do agendador que mandou o job (0 = fora de ciclo: `VALIDATE`, `WIFI_JOIN` e o `RECONNECT` do boot, `scheduler_request_reconnect`); só os resultados do ciclo aberto contam para fechá-lo (`logic/cycle`). `modelIdx` é o índice em `g_models[]` (item 3) quando o job é a sonda da conta em foco, e −1 nos outros casos.
         *   `USAGE`: `slot` e `gen` da conta.
         *   `VALIDATE`: `slot = g_tokenTargetSlot` (só para o log) e `gen = web_token_seq()` (item 6). Lê o token com `token_store_copy_pending`.
         *   `STATUS` e `RECONNECT`: `slot = -1`, `gen = 0`. O `RECONNECT` lê as redes com `token_store_copy_reconnect`; o `loop()` grava a cópia (`copySaved` + `token_store_set_reconnect`) antes de enfileirar.
@@ -1006,7 +1006,7 @@ Todos os caminhos são relativos à raiz do repositório. Os arquivos novos de f
         | `USAGE` | `FC_OK` (200 ou 429 com headers) | `usage = r.u`, `usageAtEpoch = endEpoch`, `lastClass`, `lastHttp`, `lastTryEndEpoch`, `fails = 0`, `backoffCycles = 0`. Depois: `hist_push`, `accumulate_heat`, `hist_save_due` → `hist_save`, `check_thresholds` (item 3) → `scheduler_offer_moment` |
         | `USAGE` | `FC_AUTH` | `lastClass`, `lastHttp`, `lastTryEndEpoch`; `fails++`; `backoffCycles = min(2^(fails−1), ceil(AUTH_BACKOFF_MAX_SEC / intervalo))`. `usage` e histórico não mudam |
         | `USAGE` | outra falha (`RATE`, `ERR`, `SRV`, `NET`) | `lastClass`, `lastHttp`, `lastTryEndEpoch`; `fails = 0`; `backoffCycles = 0`. `usage` e histórico não mudam |
-        | `USAGE` com `modelIdx >= 0` | qualquer, com `gen` válido | `g_models[modelIdx].pr = {probeHttp, probeMs}`, `atMs = millis()` |
+        | `USAGE` com `modelIdx >= 0` | qualquer, com `gen` válido | `acct[slot].probe[modelIdx].pr = {probeHttp, probeMs}`, `atMs = millis()` (sonda por conta: `/modelos` mostra só a da conta em foco) |
         | `STATUS` | `FC_OK` | `g_status = r.s` e `hooks.onStatus()` |
         | `STATUS` | `FC_NET` | Mantém o último `g_status`, como a v2.3 (`status.cpp:35-38`) |
         | `VALIDATE` | qualquer, inclusive `FC_DISCARDED` | `hooks.onValidate(r)`. O filtro é o do item 6, passo 4 (`r.gen` contra `web_token_seq()`), e não o `gen` da conta |
