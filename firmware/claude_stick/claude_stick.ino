@@ -20,8 +20,6 @@
 #include <lvgl.h>
 #include <Wire.h>
 #include <WiFi.h>
-#include <WebServer.h>
-#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <LittleFS.h>
 #include <time.h>
@@ -35,6 +33,7 @@
 #include "model/accounts.h"
 #include "model/account_state.h"
 #include "model/history.h"
+#include "app/web_api.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
 
@@ -55,7 +54,7 @@
 #define C_SEV_MAJOR 0xFB923C   // laranja: gravidade "major" do status.claude.com
 
 // ---- Idioma (0 = portugues, 1 = english; Ajustes -> NVS "lang") ----
-static uint8_t g_lang = 0;
+uint8_t g_lang = 0;                          // lido por web_api.cpp (TRS)
 #define TRS(pt, en) (g_lang ? (en) : (pt))
 
 // ---- Hardware ----
@@ -186,7 +185,6 @@ static void ui_accounts();
 static void ui_account_name();
 static void ui_message(const char *title, const char *sub, uint32_t color);
 static void nav_cb(lv_event_t *e);
-static void start_data_web();
 static void trend_redraw();
 static void heat_redraw();
 static void update_tok_row();
@@ -627,23 +625,16 @@ static void ui_wifi() {
 }
 
 // ============================================================
-// WebServer: token (onboarding) + dados (bridge de tokens)
+// Tela: token (onboarding). O servidor web fica em src/app/web_api.{h,cpp};
+// o que ele muda na tela ou no PIN passa pelos callbacks abaixo.
 // ============================================================
-static WebServer *g_web = nullptr;
-static volatile bool g_tokenGot = false;
 static lv_obj_t *g_tokMsg = nullptr;            // status na tela do device
 
-static void stop_web() { if (g_web) { g_web->stop(); delete g_web; g_web = nullptr; } }
-
-static bool g_mdnsUp = false;
-static void ensure_mdns() {
-  if (g_mdnsUp || !g_wifi.isConnected()) return;
-  if (MDNS.begin("claude-stick")) {
-    MDNS.addService("http", "tcp", 80);
-    g_mdnsUp = true;
-    Serial.println("[MDNS] claude-stick.local");
-  }
+static void web_token_msg_cb(const char *m) {
+  if (g_tokMsg) { lv_label_set_text(g_tokMsg, m); lv_refr_now(NULL); }
 }
+static void web_tok_stats_cb() { update_tok_row(); }
+static void web_token_ok_cb() { g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0; }
 
 static void anim_opa_cb(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
 
@@ -660,161 +651,6 @@ static lv_obj_t *build_claude_mark(lv_obj_t *parent) {
   lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
   lv_anim_start(&a);
   return img;
-}
-
-// ---- páginas HTML ----
-#define WEB_CSS \
-  ":root{--bg:#0F0F12;--card:#1A1A20;--bd:#30303A;--tx:#F2F0EC;--mut:#8C8C98;--cor:#D97757}" \
-  "*{box-sizing:border-box}" \
-  "body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,Segoe UI,Roboto,sans-serif;" \
-  "display:flex;min-height:100vh;align-items:center;justify-content:center}" \
-  ".card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:26px;max-width:520px;width:92%}" \
-  "h1{font-size:19px;margin:0 0 6px;display:flex;align-items:center;gap:10px}" \
-  "p{color:var(--mut);font-size:14px;line-height:1.5;margin:6px 0 14px}" \
-  "textarea{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;" \
-  "padding:12px;font-family:ui-monospace,monospace;font-size:13px;min-height:96px;resize:vertical}" \
-  "input{width:100%;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:10px;" \
-  "padding:12px;font-size:14px;margin-bottom:10px}" \
-  "button{margin-top:14px;width:100%;background:var(--cor);color:#1A1A20;border:0;border-radius:10px;" \
-  "padding:14px;font-size:16px;font-weight:700;cursor:pointer}" \
-  ".spark{width:26px;height:26px;flex:0 0 auto}code,a{color:var(--cor)}"
-
-#define WEB_SPARK \
-  "<svg class=spark viewBox='0 0 100 100'><g stroke='#D97757' stroke-width='12' stroke-linecap='round'>" \
-  "<line x1=50 y1=9 x2=50 y2=91/><line x1=9 y1=50 x2=91 y2=50/>" \
-  "<line x1=21 y1=21 x2=79 y2=79/><line x1=79 y1=21 x2=21 y2=79/>" \
-  "<line x1=34 y1=11 x2=66 y2=89/><line x1=66 y1=11 x2=34 y2=89/></g></svg>"
-
-static String web_form() {
-  String h = F("<!doctype html><html lang=pt><head><meta charset=utf-8>"
-               "<meta name=viewport content='width=device-width,initial-scale=1'>"
-               "<title>Claude Usage Stick</title><style>" WEB_CSS "</style></head><body><div class=card>"
-               "<h1>" WEB_SPARK " Claude Usage Stick</h1>"
-               "<p>Cole o seu token OAuth do Claude (<code>sk-ant-oat01-...</code>) e toque em <b>Salvar</b>. "
-               "O gadget vai <b>validar</b> o token e pedir um PIN na tela.</p>"
-               "<form method=POST action='/token'>"
-               "<input name=label maxlength=16 placeholder='rotulo da conta (ex.: Pessoal, Trabalho)' autocomplete=off>"
-               "<textarea name=token placeholder='sk-ant-oat01-...' autocomplete=off autofocus></textarea>"
-               "<button type=submit>Salvar e validar</button></form></div></body></html>");
-  return h;
-}
-static String web_result(bool ok, const String &msg) {
-  String h = F("<!doctype html><html lang=pt><head><meta charset=utf-8>"
-               "<meta name=viewport content='width=device-width,initial-scale=1'>"
-               "<title>Claude Usage Stick</title><style>" WEB_CSS "</style></head><body><div class=card>");
-  if (ok) {
-    h += F("<h1>" WEB_SPARK " Token validado</h1>"
-           "<p>Token aceito pela API. Agora <b>defina um PIN de 4 dígitos</b> na tela do gadget para finalizar. "
-           "Pode fechar esta página.</p>");
-  } else {
-    h += F("<h1>" WEB_SPARK " Token recusado</h1><p>");
-    h += msg;
-    h += F("</p><p><a href='/'>Voltar e tentar de novo</a></p>");
-  }
-  h += F("</div></body></html>");
-  return h;
-}
-
-static void handleRoot()     { g_web->send(200, "text/html; charset=utf-8", web_form()); }
-static void handleNotFound() { g_web->sendHeader("Location", "/"); g_web->send(302, "text/plain", ""); }
-
-static void handleTokenPost() {
-  String lb = g_web->arg("label");
-  lb.trim();
-  strlcpy(g_pendingLabel, lb.c_str(), sizeof(g_pendingLabel));
-  String t = g_web->arg("token");
-  t.trim();
-  if (t.length() < 8) {
-    if (g_tokMsg) lv_label_set_text(g_tokMsg, TRS("token vazio", "empty token"));
-    g_web->send(200, "text/html; charset=utf-8", web_result(false, "Token vazio ou muito curto."));
-    return;
-  }
-  // feedback no device antes da chamada bloqueante
-  if (g_tokMsg) { lv_label_set_text(g_tokMsg, TRS("validando token...", "validating token...")); lv_refr_now(NULL); }
-
-  UsageData tmp = {};
-  bool ok = fetchUsage(t.c_str(), tmp);
-  if (ok) {
-    strlcpy(g_pendingToken, t.c_str(), sizeof(g_pendingToken));
-    g_usage = tmp;                              // já temos dados p/ o dashboard
-    g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0;
-    g_tokenGot = true;                          // loop -> ST_SETUP_PIN
-    if (g_tokMsg) lv_label_set_text(g_tokMsg, TRS("token OK! defina o PIN", "token OK! set the PIN"));
-    g_web->send(200, "text/html; charset=utf-8", web_result(true, ""));
-  } else {
-    String m = String("A API recusou o token (") + tmp.error + "). Confira e cole de novo.";
-    if (g_tokMsg) lv_label_set_text(g_tokMsg, TRS("token recusado, tente de novo", "token rejected, try again"));
-    g_web->send(200, "text/html; charset=utf-8", web_result(false, m));
-  }
-}
-
-// ---- Endpoints de dados (bridge de tokens; ver tools/token_bridge.py) ----
-static long long jll(const String &s, const char *key) {
-  String k = String("\"") + key + "\"";
-  int i = s.indexOf(k); if (i < 0) return 0;
-  i = s.indexOf(':', i + k.length() - 1); if (i < 0) return 0;
-  return atoll(s.c_str() + i + 1);
-}
-static bool jstr(const String &s, const char *key, char *out, size_t sz) {
-  String k = String("\"") + key + "\"";
-  int i = s.indexOf(k); if (i < 0) return false;
-  i = s.indexOf(':', i + k.length()); if (i < 0) return false;
-  i = s.indexOf('"', i); if (i < 0) return false;
-  int e = s.indexOf('"', i + 1); if (e < 0) return false;
-  strlcpy(out, s.substring(i + 1, e).c_str(), sz);
-  return true;
-}
-static void handleWindow() {
-  char b[256];
-  snprintf(b, sizeof(b),
-           "{\"now\":%lu,\"h5_reset\":%lu,\"d7_reset\":%lu,\"h5_util\":%.4f,\"d7_util\":%.4f,"
-           "\"account\":\"%s\",\"slot\":%d}",
-           (unsigned long)time(nullptr),
-           (unsigned long)g_usage.h5ResetEpoch, (unsigned long)g_usage.d7ResetEpoch,
-           g_usage.h5 / 100.0f, g_usage.d7 / 100.0f,
-           g_accts.label[g_accts.active], g_accts.active);
-  g_web->send(200, "application/json", b);
-}
-static void handleTokensPost() {
-  String body = g_web->arg("plain");
-  char acct[ACCT_LBL_MAX];
-  if (jstr(body, "account", acct, sizeof(acct)) && acct[0] &&
-      strcmp(acct, g_accts.label[g_accts.active]) != 0) {
-    char r[96];
-    snprintf(r, sizeof(r), "{\"error\":\"account_mismatch\",\"active\":\"%s\"}",
-             g_accts.label[g_accts.active]);
-    g_web->send(409, "application/json", r);
-    return;
-  }
-  g_tok.tin      = jll(body, "in");
-  g_tok.tout     = jll(body, "out");
-  g_tok.cache    = jll(body, "cache");
-  g_tok.sessions = (int)jll(body, "sessions");
-  g_tok.atMs     = millis();
-  Serial.printf("[TOK] in=%lld out=%lld cache=%lld sess=%d\n",
-                g_tok.tin, g_tok.tout, g_tok.cache, g_tok.sessions);
-  g_web->send(200, "application/json", "{\"ok\":true}");
-  update_tok_row();
-}
-static void handleInfo() {
-  String h = F("<!doctype html><html lang=pt><head><meta charset=utf-8>"
-               "<meta name=viewport content='width=device-width,initial-scale=1'>"
-               "<title>Claude Usage Stick</title><style>" WEB_CSS "</style></head><body><div class=card>"
-               "<h1>" WEB_SPARK " Claude Usage Stick</h1>"
-               "<p>Device online. Endpoints: <code>GET /window</code> (janela atual) e "
-               "<code>POST /tokens</code> (bridge de tokens por sessao — ver tools/token_bridge.py).</p>"
-               "</div></body></html>");
-  g_web->send(200, "text/html; charset=utf-8", h);
-}
-static void start_data_web() {
-  stop_web();
-  ensure_mdns();
-  g_web = new WebServer(80);
-  g_web->on("/", HTTP_GET, handleInfo);
-  g_web->on("/window", HTTP_GET, handleWindow);
-  g_web->on("/tokens", HTTP_POST, handleTokensPost);
-  g_web->onNotFound([]() { g_web->send(404, "application/json", "{\"error\":\"not_found\"}"); });
-  g_web->begin();
 }
 
 static void ui_token() {
@@ -856,13 +692,7 @@ static void ui_token() {
   g_tokMsg = mklabel(scr, TRS("aguardando o token...", "waiting for the token..."), &lv_font_montserrat_14, C_MUTED);
   lv_obj_align(g_tokMsg, LV_ALIGN_BOTTOM_MID, 0, -14);
 
-  // sobe o servidor web (formulario do token)
-  g_web = new WebServer(80);
-  g_web->on("/", HTTP_GET, handleRoot);
-  g_web->on("/token", HTTP_POST, handleTokenPost);
-  g_web->onNotFound(handleNotFound);
-  g_web->begin();
-  Serial.printf("[WEB] servidor em %s\n", url.c_str());
+  web_start_onboarding();
 }
 
 // ============================================================
@@ -2601,6 +2431,10 @@ void setup() {
     load_history();
   }
 
+  web_on_token_msg(web_token_msg_cb);
+  web_on_tok_stats(web_tok_stats_cb);
+  web_on_token_ok(web_token_ok_cb);
+
   g_wifi.begin();
 
   if (g_hasToken) {
@@ -2618,13 +2452,11 @@ void loop() {
   lv_task_handler();
 
   // Servidor web (token no onboarding; /window + /tokens no dashboard)
-  if (g_web) {
-    g_web->handleClient();
-    if (g_state == ST_TOKEN && g_tokenGot) {
-      g_tokenGot = false;
-      if (g_onboarding || !g_sessionPin[0]) request_state(ST_SETUP_PIN);
-      else finalize_pending_token();
-    }
+  web_api_poll();
+  if (g_state == ST_TOKEN && g_tokenGot) {
+    g_tokenGot = false;
+    if (g_onboarding || !g_sessionPin[0]) request_state(ST_SETUP_PIN);
+    else finalize_pending_token();
   }
 
   if (g_dirty) {
