@@ -1,6 +1,6 @@
 #include "net/status.h"
 #include "config.h"
-#include "net/certs.h"
+#include "net/api.h"      // net_client_setup
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -16,16 +16,14 @@ static bool hasImpact(const String& body, const char* level) {
 
 bool fetchModelStatus(ModelStatus& out) {
     WiFiClientSecure client;
-    client.setCACert(CA_BUNDLE);
-
     HTTPClient https;
     if (!https.begin(client, STATUS_ENDPOINT)) {
         Serial.println("[STATUS] https_init failed");
         return false;
     }
+    net_client_setup(client, https);   // CA + timeouts de conexão, handshake e leitura
 
     https.addHeader("User-Agent", "claude-usage-stick/1.0");
-    https.setTimeout(API_TIMEOUT_MS);
     https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
     Serial.printf("[STATUS] GET %s\n", STATUS_ENDPOINT);
