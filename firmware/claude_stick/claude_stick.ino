@@ -200,6 +200,25 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
   }
 }
 
+#ifdef THEP_DEV
+// GET /health (item 6, só THEP_DEV): tempo de quadro medido pelos eventos de
+// refresh do display (a passada inteira, inclusive o flush) e uso do pool do
+// LVGL, lidos aqui porque o loop() é o dono do LVGL.
+static uint32_t g_frameStartMs = 0, g_frameMsMax = 0;
+static void frame_evt_cb(lv_event_t *e) {
+  if (lv_event_get_code(e) == LV_EVENT_REFR_START) { g_frameStartMs = millis(); return; }
+  if (!g_frameStartMs) return;
+  uint32_t d = millis() - g_frameStartMs;
+  if (d > g_frameMsMax) g_frameMsMax = d;
+}
+static void health_ui_cb(WebHealthUi *o) {
+  lv_mem_monitor_t m;
+  lv_mem_monitor(&m);
+  o->lvMemUsedPct = m.used_pct;
+  o->frameMsMax = g_frameMsMax;
+}
+#endif
+
 // ============================================================
 // Helpers de UI
 // ============================================================
@@ -2380,6 +2399,12 @@ void setup() {
   lv_display_t *disp = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   lv_display_set_flush_cb(disp, disp_flush_cb);
   lv_display_set_buffers(disp, buf, NULL, bufSize, LV_DISPLAY_RENDER_MODE_FULL);
+#ifdef THEP_DEV
+  lv_display_add_event_cb(disp, frame_evt_cb, LV_EVENT_REFR_START, NULL);
+  lv_display_add_event_cb(disp, frame_evt_cb, LV_EVENT_REFR_READY, NULL);
+  web_on_health_ui(health_ui_cb);
+  Serial.println("[BOOT] build THEP_DEV: GET /health ativo");
+#endif
   lv_indev_t *indev = lv_indev_create();
   lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
   lv_indev_set_read_cb(indev, touch_read_cb);
