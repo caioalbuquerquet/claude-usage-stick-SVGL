@@ -185,10 +185,8 @@ void build_footer() {
     lv_obj_remove_flag(f, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_font_t* f11 = theme_font(FONT_11);
-    lv_obj_t* bird = lv_image_create(f);
-    lv_image_set_src(bird, &img_bird_braille_13);
-    label(f, "thep", f11, C_TITLE);
-    footer_sep(f);
+    // Pássaro e "thep" saíram do rodapé (pedido do dono): o rodapé começa
+    // direto na contagem de contas.
     s_footAcct = label(f, "", f11, C_TEXT);
     footer_sep(f);
     label(f, LV_SYMBOL_REFRESH, f11, C_DIM);          // ↻ pela Montserrat 14 (fallback)

@@ -50,7 +50,9 @@ const LayoutSpec SPEC[4] = {
   // 1 conta: coluna direita de 272 px ao lado do pássaro
   {272, 214, 16, 18, FONT_13, 10, 41, RESET_IN_AT, &T::CARD_RESET, nullptr, &T::CARD_RESET},
   // 2 colunas
-  {210, 214, 16, 14, FONT_13, 8, 31, RESET_IN_AT, &T::CARD_RESET, &T::CARD_WEEK, &T::CARD_RESET},
+  // texto secundário em 13 px (teste pedido pelo dono): ~7,8 px por caractere,
+  // então a projeção cabe em 26 caracteres nos 210 px do card
+  {210, 214, 16, 14, FONT_13, 8, 26, RESET_IN_AT, &T::CARD_RESET, &T::CARD_WEEK, &T::CARD_RESET},
   // 3 colunas: rótulo de 10 para caber com a marca de 8 (tools/gen_mockups.py)
   {138, 214, 10, 9, FONT_11, 0, 20, RESET_IN_AT, nullptr, &T::CARD_WEEK_S, &T::CARD_RESET_S},
   // 2 x 2
@@ -275,35 +277,43 @@ void build_l1(Card& c, lv_obj_t* box) {
 void build_cols(Card& c, lv_obj_t* box, LayoutKind L) {
   const LayoutSpec& S = SPEC[L];
   const bool two = (L == LAYOUT_2);
-  const lv_font_t* f11 = theme_font(FONT_11);
+  // Layout 2: texto secundário em 13 px e linhas mais espaçadas, ocupando a
+  // altura do card (teste pedido pelo dono). Layout 3 continua em 11 px, que é
+  // o que cabe em colunas de 138 px.
+  const lv_font_t* ft = theme_font(two ? FONT_13 : FONT_11);
   const lv_font_t* fb = theme_font(FONT_BOLD_13);
   const lv_font_t* fn = theme_font_num(L);
   const lv_font_t* fbar = theme_font(S.bar5Font);
   char t[48];
 
+  // linhas de base (y) de cada linha do card
+  const int yLabel = two ? 14 : 12;
+  const int y5h    = two ? 36 : 28;
+  const int yPct   = two ? 76 : 56;
+  const int yBar5  = two ? 98 : 73;
+  const int yR5    = two ? 118 : 89;
+  const int yWk    = two ? 146 : 112;
+  const int yR7    = two ? 166 : 128;
+  const int yProj  = two ? 196 : 148;
+
   label_text(c.slot, S.labelMax, t, sizeof(t));
-  c.label = mk_label(box, fb, C_ACCENT, 0, 12, t);
-  spans_make(c.mark, box, 1, f11, 0, 12);
-  align_right(c.mark.g, f11, 12);
-  mk_label(box, f11, C_DIM, 0, 28, "5h");
-  const int pctBase = two ? 62 : 56;
-  c.pct = mk_label(box, fn, C_DIM, 0, pctBase);
-  const int b5 = two ? 82 : 73;
-  bar_make(c.bar5, box, fbar, 0, b5);
-  const int r5 = two ? 99 : 89;
-  spans_make(c.r5, box, 2, f11, 0, r5);
-  const int wk = two ? 122 : 112;
+  c.label = mk_label(box, fb, C_ACCENT, 0, yLabel, t);
+  spans_make(c.mark, box, 1, ft, 0, yLabel);
+  align_right(c.mark.g, ft, yLabel);
+  mk_label(box, ft, C_DIM, 0, y5h, "5h");
+  c.pct = mk_label(box, fn, C_DIM, 0, yPct);
+  bar_make(c.bar5, box, fbar, 0, yBar5);
+  spans_make(c.r5, box, 2, ft, 0, yR5);
   key_text(S.wkKey, t, sizeof(t));
-  c.wkKey = mk_label(box, f11, C_DIM, 0, wk, t);
-  s_wkKeyW = (int16_t)text_w(t, f11);
-  c.wkPct = mk_label(box, fb, C_DIM, s_wkKeyW, wk);
+  c.wkKey = mk_label(box, ft, C_DIM, 0, yWk, t);
+  s_wkKeyW = (int16_t)text_w(t, ft);
+  c.wkPct = mk_label(box, fb, C_DIM, s_wkKeyW, yWk);
   if (S.bar7Cells) {
-    bar_make(c.bar7, box, f11, 0, wk);
-    align_right(c.bar7.g, f11, wk);
+    bar_make(c.bar7, box, ft, 0, yWk);
+    align_right(c.bar7.g, ft, yWk);
   }
-  const int r7 = two ? 139 : 128;
-  spans_make(c.r7, box, 2, f11, 0, r7);
-  c.proj = mk_label(box, f11, C_DIM, 0, two ? 160 : 148);
+  spans_make(c.r7, box, 2, ft, 0, yR7);
+  c.proj = mk_label(box, ft, C_DIM, 0, yProj);
 }
 
 // Layout 4 (2 x 2, 210 x 103): rótulo e "5h NN%" na mesma linha, barra,
