@@ -14,6 +14,11 @@ Level level_for(float pct);
 // se não couber, corta em bloco inteiro.
 void text_bar(float pct, int cells, char* out, size_t outSize);
 
+// Divide a barra do text_bar no primeiro "░" (acesos numa cor, apagados em
+// outra): copia o trecho aceso para on (onSize bytes, sem partir um bloco) e
+// devolve o trecho apagado, que aponta para dentro de bar ("" se não há).
+const char* text_bar_split(const char* bar, char* on, size_t onSize);
+
 // Layout da tela inicial por quantidade de contas: n <= 1 -> LAYOUT_1,
 // n >= 4 -> LAYOUT_4.
 enum LayoutKind : uint8_t { LAYOUT_1, LAYOUT_2, LAYOUT_3, LAYOUT_4 };

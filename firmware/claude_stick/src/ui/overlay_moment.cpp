@@ -48,16 +48,12 @@ void close_cb(lv_event_t* e) {
 }
 
 void set_bar(float v, uint32_t col) {
-  char all[3 * NCELLS + 1];
+  char all[3 * NCELLS + 1], on[sizeof(all)];
   text_bar(v, NCELLS, all, sizeof(all));
-  const char* off = strstr(all, "\xE2\x96\x91");   // primeiro "░"
-  char on[sizeof(all)];
-  size_t k = off ? (size_t)(off - all) : strlen(all);
-  memcpy(on, all, k);
-  on[k] = 0;
+  const char* off = text_bar_split(all, on, sizeof(on));
   lv_span_set_text(g_mo.barOn, on);
   lv_style_set_text_color(lv_span_get_style(g_mo.barOn), lv_color_hex(col));
-  lv_span_set_text(g_mo.barOff, off ? off : "");
+  lv_span_set_text(g_mo.barOff, off);
   lv_spangroup_refr_mode(g_mo.bar);
   lv_obj_invalidate(g_mo.bar);
 }
@@ -119,10 +115,8 @@ bool show_moment(int slot, int win, int thr) {
   }
 
   // coluna de texto: conta, janela, % contando, barra, mensagem, reset
-  char lbl[ACCT_LBL_MAX + 16], fit[ACCT_LBL_MAX + 16];
-  if (g_accts.label[slot][0]) snprintf(lbl, sizeof(lbl), "%s", g_accts.label[slot]);
-  else snprintf(lbl, sizeof(lbl), tr(T::ACCT_DEFAULT_FMT), slot + 1);
-  fit_label(lbl, 32, fit, sizeof(fit));
+  char fit[ACCT_LBL_MAX + 16];
+  account_label(slot, 32, fit, sizeof(fit));
   ui_label(s, fb, C_ACCENT, COL_X, 64, fit);
   ui_label(s, f13, C_DIM, COL_X, 84, win == 0 ? TRS("Janela 5h", "5h window")
                                               : TRS("Semana", "Week"));

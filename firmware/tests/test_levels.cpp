@@ -132,3 +132,27 @@ TEST(levels_status_mark) {
     }
     CHECK_STR(status_mark("allowed", 0, buf, sizeof(buf), nullptr), "ok");   // tone opcional
 }
+
+// Barra dividida no primeiro "░" (acesos / apagados, achado 9).
+TEST(levels_text_bar_split) {
+    char all[3 * 10 + 1], on[sizeof(all)];
+    text_bar(30.0f, 10, all, sizeof(all));                 // 3 acesos, 7 apagados
+    const char* off = text_bar_split(all, on, sizeof(on));
+    CHECK_STR(on, "\xE2\x96\x88\xE2\x96\x88\xE2\x96\x88");
+    CHECK_EQ(strlen(off), 7u * 3u);
+    CHECK(off == all + 9);                                  // aponta para dentro da barra
+    text_bar(100.0f, 4, all, sizeof(all));                 // tudo aceso
+    off = text_bar_split(all, on, sizeof(on));
+    CHECK_STR(on, all);
+    CHECK_STR(off, "");
+    text_bar(0.0f, 4, all, sizeof(all));                   // tudo apagado
+    off = text_bar_split(all, on, sizeof(on));
+    CHECK_STR(on, "");
+    CHECK(off == all);
+    char small[5];                                          // cabe 1 bloco: não parte o 2º
+    text_bar(100.0f, 4, all, sizeof(all));
+    text_bar_split(all, small, sizeof(small));
+    CHECK_STR(small, "\xE2\x96\x88");
+    CHECK_STR(text_bar_split(nullptr, on, sizeof(on)), "");
+    CHECK_STR(on, "");
+}

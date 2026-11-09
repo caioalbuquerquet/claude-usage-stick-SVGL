@@ -73,6 +73,10 @@ constexpr int FRAME_CONTENT_W = 438;
 constexpr int FRAME_CONTENT_H = 234;
 lv_obj_t* ui_frame(const char* title);
 
+// Rótulo da conta do slot, ou "Conta N" (ACCT_DEFAULT_FMT) se vazio. Com
+// maxChars > 0, cortado com "…" (fit_label, em code points); senão inteiro.
+void account_label(int slot, int maxChars, char* out, size_t sz);
+
 // /janela e /ritmo: título do painel = rótulo da conta em foco; com mais de
 // uma conta, tocar nele passa para a próxima (intent_focus_next).
 void ui_focus_title();

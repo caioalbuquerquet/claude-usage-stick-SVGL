@@ -11,6 +11,7 @@
 #include "ui/assets_thep.h"
 #include "app/app_state.h"
 #include "model/accounts.h"
+#include "logic/levels.h"
 
 extern AccountSlots g_accts;
 
@@ -308,11 +309,20 @@ lv_obj_t* ui_frame(const char* title) {
   return content;
 }
 
+void account_label(int slot, int maxChars, char* out, size_t sz) {
+  if (!out || sz == 0) return;
+  char raw[ACCT_LBL_MAX + 16];
+  if (slot >= 0 && slot < ACCT_MAX && g_accts.label[slot][0])
+    snprintf(raw, sizeof(raw), "%s", g_accts.label[slot]);
+  else
+    snprintf(raw, sizeof(raw), tr(T::ACCT_DEFAULT_FMT), slot + 1);
+  if (maxChars > 0) fit_label(raw, maxChars, out, sz);
+  else snprintf(out, sz, "%s", raw);
+}
+
 void ui_focus_title() {
-  int a = g_accts.active;
   char t[ACCT_LBL_MAX + 16];
-  if (a >= 0 && a < ACCT_MAX && g_accts.label[a][0]) snprintf(t, sizeof(t), "%s", g_accts.label[a]);
-  else snprintf(t, sizeof(t), tr(T::ACCT_DEFAULT_FMT), a + 1);
+  account_label(g_accts.active, 0, t, sizeof(t));
   shell_set_title(t);
   if (accountCount(g_accts) > 1) shell_set_title_action(intent_focus_next);
 }

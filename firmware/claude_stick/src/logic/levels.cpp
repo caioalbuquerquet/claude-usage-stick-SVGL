@@ -27,6 +27,22 @@ void text_bar(float pct, int cells, char* out, size_t outSize) {
     out[pos] = 0;
 }
 
+const char* text_bar_split(const char* bar, char* on, size_t onSize) {
+    if (on && onSize) on[0] = 0;
+    if (!bar) return "";
+    const char* off = strstr(bar, "\xE2\x96\x91");   // primeiro "░"
+    size_t k = off ? (size_t)(off - bar) : strlen(bar);
+    if (on && onSize) {
+        if (k > onSize - 1) {
+            k = onSize - 1;
+            while (k > 0 && ((unsigned char)bar[k] & 0xC0) == 0x80) k--;   // bloco inteiro
+        }
+        memcpy(on, bar, k);
+        on[k] = 0;
+    }
+    return off ? off : "";
+}
+
 LayoutKind layout_for_count(int n) {
     if (n <= 1) return LAYOUT_1;
     if (n == 2) return LAYOUT_2;

@@ -151,15 +151,11 @@ void bar_make(Spans& s, lv_obj_t* p, const lv_font_t* f, int x, int base) {
   spans_set(s, 3, "]", C_DIM);
 }
 void bar_set(Spans& s, float pct, int cells, uint32_t col) {
-  char all[3 * 20 + 1];
+  char all[3 * 20 + 1], on[sizeof(all)];
   text_bar(pct, cells, all, sizeof(all));
-  const char* off = strstr(all, "\xE2\x96\x91");   // primeiro "░"
-  char on[sizeof(all)];
-  size_t k = off ? (size_t)(off - all) : strlen(all);
-  memcpy(on, all, k);
-  on[k] = 0;
+  const char* off = text_bar_split(all, on, sizeof(on));
   spans_set(s, 1, on, col);
-  spans_set(s, 2, off ? off : "", C_UNLIT);
+  spans_set(s, 2, off, C_UNLIT);
   spans_commit(s);
 }
 void kv_set(Spans& s, const char* key, const char* val, uint32_t col) {
@@ -195,13 +191,6 @@ lv_obj_t* card_box(lv_obj_t* p, int slot, int x, int y, int w, int h, bool focus
   return b;
 }
 
-void label_text(int slot, int maxChars, char* out, size_t sz) {
-  char raw[ACCT_LBL_MAX + 16];
-  if (g_accts.label[slot][0]) snprintf(raw, sizeof(raw), "%s", g_accts.label[slot]);
-  else snprintf(raw, sizeof(raw), tr(T::ACCT_DEFAULT_FMT), slot + 1);
-  fit_label(raw, maxChars, out, sz);
-}
-
 // ---- Montagem por layout ----
 void build_l1(Card& c, lv_obj_t* box) {
   const LayoutSpec& S = SPEC[LAYOUT_1];
@@ -216,7 +205,7 @@ void build_l1(Card& c, lv_obj_t* box) {
   lv_image_set_src(bird, &img_bird_braille_124);
   lv_obj_remove_flag(bird, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_pos(bird, (150 - 124) / 2, 18);
-  label_text(c.slot, S.labelMax, t, sizeof(t));
+  account_label(c.slot, S.labelMax, t, sizeof(t));
   c.label = ui_label(box, fb, C_ACCENT, 0, 160, t);
   lv_obj_set_width(c.label, 150);
   lv_obj_set_style_text_align(c.label, LV_TEXT_ALIGN_CENTER, 0);
@@ -263,7 +252,7 @@ void build_cols(Card& c, lv_obj_t* box, LayoutKind L) {
   const int yR7    = two ? 166 : 128;
   const int yProj  = two ? 196 : 148;
 
-  label_text(c.slot, S.labelMax, t, sizeof(t));
+  account_label(c.slot, S.labelMax, t, sizeof(t));
   c.label = ui_label(box, fb, C_ACCENT, 0, yLabel, t);
   spans_make(c.mark, box, 1, ft, 0, yLabel);
   align_right(c.mark.g, ft, yLabel);
@@ -292,7 +281,7 @@ void build_l4(Card& c, lv_obj_t* box) {
   const lv_font_t* fn = theme_font_num(LAYOUT_4);
   char t[48];
 
-  label_text(c.slot, S.labelMax, t, sizeof(t));
+  account_label(c.slot, S.labelMax, t, sizeof(t));
   c.label = ui_label(box, fb, C_ACCENT, 0, 18, t);
   c.pct = ui_label(box, fn, C_DIM, 0, 18);
   align_right(c.pct, fn, 18);

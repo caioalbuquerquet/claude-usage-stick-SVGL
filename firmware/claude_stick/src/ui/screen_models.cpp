@@ -80,10 +80,8 @@ void screen_models_build(lv_obj_t* parent) {
   const lv_font_t* fb = theme_font(FONT_BOLD_13);
 
   // "Modelos · <conta em foco>"
-  int a = g_accts.active;
   char lbl[ACCT_LBL_MAX + 16], t[64];
-  if (a >= 0 && a < ACCT_MAX && g_accts.label[a][0]) snprintf(lbl, sizeof(lbl), "%s", g_accts.label[a]);
-  else snprintf(lbl, sizeof(lbl), tr(T::ACCT_DEFAULT_FMT), a + 1);
+  account_label(g_accts.active, 0, lbl, sizeof(lbl));
   snprintf(t, sizeof(t), tr(T::MODELS_TITLE_FMT), lbl);
   lv_obj_t* sec = ui_label(parent, fb, C_ACCENT, 0, 14, t);
   if (accountCount(g_accts) > 1) {

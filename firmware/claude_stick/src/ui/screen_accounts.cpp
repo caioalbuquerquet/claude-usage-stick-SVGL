@@ -118,10 +118,8 @@ void screen_accounts_build(lv_obj_t* p) {
     lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
-    char lbl[ACCT_LBL_MAX + 16], fit[ACCT_LBL_MAX + 16];
-    if (g_accts.label[i][0]) snprintf(lbl, sizeof(lbl), "%s", g_accts.label[i]);
-    else snprintf(lbl, sizeof(lbl), tr(T::ACCT_DEFAULT_FMT), i + 1);
-    fit_label(lbl, 22, fit, sizeof(fit));
+    char fit[ACCT_LBL_MAX + 16];
+    account_label(i, 22, fit, sizeof(fit));
     lv_obj_t* a = lv_obj_create(row);
     lv_obj_remove_style_all(a);
     lv_obj_set_pos(a, 0, 0);
