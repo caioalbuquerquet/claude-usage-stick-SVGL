@@ -24,3 +24,6 @@ firmware/*/build/
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# binários de backup locais (não versionar)
+backups/
