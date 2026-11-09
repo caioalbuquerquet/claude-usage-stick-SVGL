@@ -16,6 +16,13 @@ public:
         bool open;
     };
 
+    // Rede salva (SSID + senha). Pública na v3 para a cópia do RECONNECT
+    // (token_store), que a net_task lê sem tocar no NVS.
+    struct SavedNet {
+        char ssid[33];
+        char pass[65];
+    };
+
     bool begin() {
         _prefs.begin("wifi", false);
         _loadAll();
@@ -100,6 +107,47 @@ public:
         return connectTo(_nets[idx].ssid, _nets[idx].pass, timeout_ms);
     }
 
+    // ── v3: WiFi sem NVS para a net_task ─────────────────
+    // Copia as redes salvas (ordem de preferência) e devolve quantas.
+    // Chamada no loop(), dono do NVS, antes de enfileirar um RECONNECT.
+    int copySaved(SavedNet out[MAX_SAVED_NETWORKS]) {
+        for (int i = 0; i < _count; i++) out[i] = _nets[i];
+        return _count;
+    }
+
+    // Tenta cada rede da lista, em ordem, como autoConnect(), mas SEM
+    // _promote/_saveAll: não toca no NVS nem no estado do objeto. É a única
+    // função de WiFi chamada pela net_task. *winnerIdx = índice que conectou
+    // (-1 se nenhuma). A senha nunca é logada.
+    static bool connectList(const SavedNet* nets, int n, int timeoutMs, int* winnerIdx) {
+        if (winnerIdx) *winnerIdx = -1;
+        if (!nets || n <= 0) return false;
+        if (n > MAX_SAVED_NETWORKS) n = MAX_SAVED_NETWORKS;
+        for (int i = 0; i < n; i++) {
+            if (nets[i].ssid[0] == '\0') continue;
+            Serial.printf("WiFi: trying '%s' (%d/%d)...\n", nets[i].ssid, i + 1, n);
+            WiFi.begin(nets[i].ssid, nets[i].pass);
+
+            unsigned long start = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - start < (unsigned long)timeoutMs) {
+                delay(100);
+            }
+            if (WiFi.status() == WL_CONNECTED) {
+                Serial.printf("WiFi: connected to '%s'! IP=%s\n",
+                    nets[i].ssid, WiFi.localIP().toString().c_str());
+                if (winnerIdx) *winnerIdx = i;
+                return true;
+            }
+            WiFi.disconnect();
+        }
+        Serial.println("WiFi: no saved network available");
+        return false;
+    }
+
+    // Promove a rede idx para o topo e grava no NVS. Chamada pelo loop()
+    // quando o resultado do RECONNECT chega (netIdx). idx <= 0 não faz nada.
+    void promote(int idx) { _promote(idx); }
+
     void forgetNetwork(int idx) {
         if (idx < 0 || idx >= _count) return;
         for (int i = idx; i < _count - 1; i++) _nets[i] = _nets[i + 1];
@@ -117,10 +165,6 @@ public:
 private:
     Preferences _prefs;
 
-    struct SavedNet {
-        char ssid[33];
-        char pass[65];
-    };
     SavedNet _nets[MAX_SAVED_NETWORKS];
     int _count = 0;
 
