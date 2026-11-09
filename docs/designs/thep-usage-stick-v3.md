@@ -1,7 +1,7 @@
 # THEP Usage Stick v3 — várias contas na tela inicial e UI no estilo Hermes
 
 *   **Author:** caio
-*   **Status:** Approved
+*   **Status:** Implemented (fase 4 em validação)
 *   **Date:** 2026-11-08 (revisado em 2026-11-09)
 
 --------------------------------------------------------------------------------
@@ -1608,6 +1608,21 @@ Todos os caminhos são relativos à raiz do repositório. Os arquivos novos de f
     7.  Com 2 contas, remover uma conta no meio de um ciclo: o `/histN.bin` dela não é recriado e o layout muda de 2 para 1. Logo em seguida, ainda no mesmo ciclo, adicionar uma conta no mesmo slot: o resultado atrasado da conta removida é descartado (`gen` preservado por `acct_clear`, item 3), e a conta nova aparece como `consultando…` até a primeira resposta dela.
     8.  Bridge com dois `--config-dir` e `--account` diferentes: cada conta recebe a própria contagem de tokens, e um rótulo errado devolve 404.
     9.  Gravar a v2.3 de volta (só o app): a v2.3 abre com PIN, a conta em foco vira a ativa e o histórico continua.
+
+--------------------------------------------------------------------------------
+
+## Implementation notes
+
+Desvios do plano registrados durante a implementação e a validação na placa (2026-11-09). O resto do documento continua descrevendo o plano aprovado; onde houver conflito, vale esta seção.
+
+*   **Core `esp32:esp32` 3.3.8.** A v3 foi compilada e validada nessa versão. README, `build.sh`, `flash.sh` e `firmware/REFERENCIA-HARDWARE-LVGL.md` foram corrigidos (itens 46 e 47).
+*   **Resultado do spike do display (item 34).** O AXS15231B em QSPI **ignora a janela de linhas (RASET)**: o modo parcial com a faixa exata desenhou deslocado. O padrão ficou `DISP_BANDS=1` + `DISP_ROT_FAST=1` (`config.h`): render `PARTIAL`, rotação de 270° em blocos 16×16 (`src/logic/rot270`) e envio de linhas nativas inteiras sempre a partir da linha 0 (o prefixo `0..r1` que cobre o que mudou). Medido: pior quadro 44–46 ms (`rows_max` 459, na troca do relógio do rodapé), rotação < 1 ms, envio ~37 ms; o modo FULL anterior dava ~96–109 ms. O pulso ficou no plano: 4 degraus a cada 400 ms (ciclo de 1,6 s). O NFR de 40 ms é atendido, exceto nos quadros que tocam a borda esquerda da paisagem. Detalhes em `firmware/REFERENCIA-HARDWARE-LVGL.md` §4.
+*   **Layout de 2 contas com texto secundário em 13 px** (era 11 px no item 37), com as linhas distribuídas pela altura do card; a projeção cabe em 26 caracteres. Pedido do dono.
+*   **Rodapé sem o pássaro de 13 px e sem "thep":** começa direto na contagem de contas. Pedido do dono.
+*   **Layout de 3 contas com rótulo de até 10 caracteres** (era 11), para caber ao lado da marca de estado de 8 (conferido pelo `tools/gen_mockups.py`).
+*   **Novo estado de projeção `JANELA_PASSOU`.** Quando o reset da 5h já passou (`resetEpoch <= now`) e a próxima leitura ainda não chegou, `projection()` devolve `JANELA_PASSOU` (regra 1b, entre as regras 1 e 2), o card mostra `— janela reiniciou` e o reset vira `passou · HH:MM` (`reset_text`), em vez de uma contagem parada.
+*   **Memória medida:** heap interno livre ~166 KB durante os ciclos, maior bloco ~98–106 KB, pool do LVGL na PSRAM. App ~1,64 MB depois da remoção do Clawd e das Montserrat não usadas (v2.3: ~2,05 MB).
+*   **Rollback:** os binários da v2.3 ficam guardados localmente em `backups/` (no `.gitignore`); o rollback grava só a partição de app (README, "Rollback to v2.3").
 
 --------------------------------------------------------------------------------
 
