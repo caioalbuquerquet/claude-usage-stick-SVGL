@@ -33,6 +33,7 @@
 #include "net/status.h"
 #include "sec/crypto.h"
 #include "model/accounts.h"
+#include "model/account_state.h"
 #include "model/history.h"
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
@@ -75,7 +76,6 @@ static bool  g_dirty = false;
 static void request_state(State s) { g_pending = s; g_dirty = true; }
 
 // ---- Dados ----
-static UsageData   g_usage = {};
 static ModelStatus g_status = {true, true, true, true, false, SEV_NONE};
 
 // ---- Modelos sondados (1 por ciclo, rotativo) ----
@@ -89,10 +89,7 @@ static ModelInfo g_models[NMODELS] = {
 };
 static int g_probeIdx = 0;
 
-// ---- Tokens por sessao (vindos do bridge via POST /tokens) ----
-struct TokenStats { long long tin, tout, cache; int sessions; uint32_t atMs; };
-static TokenStats g_tok = {0, 0, 0, 0, 0};
-#define TOK_FRESH_MS (15UL * 60UL * 1000UL)
+// ---- Uso, tokens por sessao e limiares da conta ativa: src/model/account_state.{h,cpp} ----
 
 // ---- Token / segurança ----
 AccountSlots g_accts;               // lida por history.cpp e web_api.cpp
@@ -1531,9 +1528,6 @@ struct MomentUI {
 static MomentUI g_mo = {};
 static uint32_t g_momentUntil = 0;
 static int g_pendWin = -1, g_pendThr = 0;      // momento aguardando exibição
-static uint8_t g_thrFired[2] = {0, 0};         // bits já disparados por janela
-static float g_thrPrev[2] = {-1, -1};
-static bool g_thrBase = false;
 static lv_point_precise_t g_moXPts[4][2];      // olhos em X (KO)
 
 // Detecta cruzamento de limiar após cada fetch. Baseline no 1º fetch (não
