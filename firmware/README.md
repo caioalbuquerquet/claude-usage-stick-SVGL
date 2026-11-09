@@ -64,9 +64,21 @@ AUTH) e `[HEAP]` (heap, stack da task e tempos de quadro: `frame_max`, `flush_ma
 | `sec/` | `crypto` | AES-256-GCM, chave derivada do PIN (SHA-256 × 10.000, salt = MAC) e a chave da sessão |
 | `ui/` | `shell`, `overlay_menu` | Shell fixo (cabeçalho com logo, ponto pulsante e `❯ menu`; painel com título na borda; rodapé) e o menu modal |
 | | `screen_*` | Conteúdos do painel (`home`, `models`, `trend`, `heat`, `accounts`, `settings`, `about`, `token`, `wifi`) e as telas cheias de antes do desbloqueio (`pin`, `wifi` e `token` do onboarding) |
+| | `screen_splash` | Abertura (`ST_SPLASH`, ver abaixo) |
 | | `overlay_moment`, `overlay_incident` | Momento de limiar e alerta de incidente no `lv_layer_top` |
 | | `theme`, `widgets`, `i18n.h` | Papéis de cor THEP, estilos e fontes; peças compartilhadas; textos pt/en (`TRS`, `tr()`) |
 | | `fonts/`, `assets_thep.{h,c}` | **Gerados:** JetBrains Mono 11/13/bold 13 e numéricas bold 20/30/38/50; logo THEP e pássaro em braille |
+
+**Abertura.** No boot, antes do PIN (ou do onboarding), a tela mostra o pássaro em braille 56×56,
+o logo THEP 264×96 e três pontos de carga ([`../assets/mock-splash.png`](../assets/mock-splash.png)).
+Ela aparece parada logo depois do display, enquanto o `setup()` carrega NVS, LittleFS e o WiFi
+(o `autoConnect` bloqueia o `loop()`); no fim do `setup()` anima por 4 s (uma passada de uma faixa
+de brilho no logo, a ~10 quadros/s) e pede a primeira tela. O logo é montado num buffer RGB565A8
+de 76 KB na PSRAM (fora do pool do LVGL) a partir do alfa em 1 bit do `img_thep_logo_splash`, e o
+brilho é misturado só nas colunas que a faixa toca. Na troca de estado o `screen_splash_reset()`
+apaga os objetos e o timer e libera o buffer. Custo: ~14 KB de flash; cada quadro manda de ~260 a
+~372 linhas nativas (~21–30 ms). O serial mostra `[SPLASH]` com os quadros e o `frame_max` da
+animação.
 
 O `claude_stick.ino` ficou com o hardware (display, touch, backlight), o PIN e a sessão
 (desbloqueio de todos os slots, chave da sessão), o registro das telas e o `loop()`.
@@ -118,8 +130,10 @@ Não edite à mão; rode o gerador de novo.
   fonte. Um glifo fora de ASCII/Latin-1 que falte na TTF é erro, exceto o `⚠` (U+26A0), que só
   avisa e sai das faixas (a JetBrains Mono 2.304 tem o glifo, e as fontes geradas o incluem).
 - **`tools/gen_hermes_assets.py`** → `claude_stick/src/ui/assets_thep.{h,c}`: logo THEP em ANSI
-  Shadow (104×38) e o pássaro em braille (124×124 e 13×13), em `LV_COLOR_FORMAT_RGB565A8`, a partir
-  de `assets/brand/thep-bird.png`. `--preview DIR` grava PNGs de conferência.
+  Shadow (104×38) e o pássaro em braille (124×124, 56×56 e 13×13), em `LV_COLOR_FORMAT_RGB565A8`,
+  a partir de `assets/brand/thep-bird.png`, e o logo da abertura (264×96) só com o alfa, em
+  `LV_COLOR_FORMAT_A1`, mais as cores das faixas (`THEP_LOGO_SPLASH_*`). `--preview DIR` grava
+  PNGs de conferência.
 - **`tools/gen_mockups.py`** → `assets/mock-*.png` do README, com as mesmas fontes (precisa do
   `gen_fonts.sh` rodado antes) e imagens do firmware. Confere a largura de cada texto da tabela de
   layouts e sai com erro se algum estourar; `--check` só confere.
