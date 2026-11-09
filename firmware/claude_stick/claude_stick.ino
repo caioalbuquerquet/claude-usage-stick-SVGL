@@ -40,6 +40,7 @@
 #include "net/token_store.h"
 #include "app/web_api.h"
 #include "ui/i18n.h"
+#include "ui/theme.h"         // fase 3: tema THEP (as telas ainda usam a paleta abaixo)
 #include <mbedtls/platform_util.h>
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
@@ -2391,6 +2392,7 @@ void setup() {
 
   // LVGL
   lv_init();
+  theme_init();   // só inicializa os estilos; nenhuma tela usa ainda
   lv_tick_set_cb([]() -> uint32_t { return millis(); });
   uint32_t bufSize = SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(lv_color_t);
   lv_color_t *buf = (lv_color_t *)heap_caps_malloc(bufSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
