@@ -55,3 +55,23 @@ TEST(hist_save_clock_went_back) {
     const uint32_t T = 1700000000u;
     CHECK(hist_save_is_due(T - 10, T, 9, 9, 300));
 }
+
+// Índices do /histN.bin (achado 6): fora da faixa = arquivo corrompido.
+TEST(hist_file_ok_faixas) {
+    CHECK(hist_file_ok(0, 0, 160, 0, 31));          // vazio
+    CHECK(hist_file_ok(42, 42, 160, 3, 31));
+    CHECK(hist_file_ok(160, 159, 160, 31, 31));     // ring cheio
+    CHECK(hist_file_ok(160, 0, 160, 0, 31));
+    CHECK(!hist_file_ok(-1, 0, 160, 0, 31));
+    CHECK(!hist_file_ok(161, 0, 160, 0, 31));
+    CHECK(!hist_file_ok(10, 160, 160, 0, 31));      // head == cap
+    CHECK(!hist_file_ok(10, -1, 160, 0, 31));
+    CHECK(!hist_file_ok(10, 10, 160, -1, 31));
+    CHECK(!hist_file_ok(10, 10, 160, 32, 31));
+    CHECK(!hist_file_ok(0x7FFFFFFF, 0x7FFFFFFF, 160, 0, 31));
+    CHECK(!hist_file_ok(0, 0, 0, 0, 31));           // cap inválido
+    // v1: sem heatmap por dia (maxDays < 0 ignora dayN)
+    CHECK(hist_file_ok(120, 7, 120, 12345, -1));
+    CHECK(!hist_file_ok(121, 7, 120, 0, -1));
+    CHECK(!hist_file_ok(5, -3, 120, 0, -1));
+}

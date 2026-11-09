@@ -16,3 +16,10 @@ uint8_t auth_backoff_cycles(uint8_t fails, uint32_t intervalSec, uint32_t maxSec
 //   · o reset da janela de 5h mudou desde a última gravação.
 bool hist_save_is_due(uint32_t now, uint32_t lastSaveEpoch,
                       uint32_t h5ResetNow, uint32_t lastSavedReset, uint32_t minSec);
+
+// Índices lidos do /histN.bin (model/history.cpp, hist_load): o ring de cap
+// amostras precisa de 0 <= n <= cap e 0 <= head < cap, e o heatmap por dia de
+// 0 <= dayN <= maxDays (maxDays < 0: arquivo sem heatmap por dia, a v1).
+// Falso = arquivo corrompido; o hist_load o trata como vazio. É o que basta
+// para hist_push e projection não lerem nem escreverem fora do array.
+bool hist_file_ok(int n, int head, int cap, int dayN, int maxDays);

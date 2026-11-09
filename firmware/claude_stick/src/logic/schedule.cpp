@@ -17,3 +17,11 @@ bool hist_save_is_due(uint32_t now, uint32_t lastSaveEpoch,
     if (now < lastSaveEpoch) return true;
     return now - lastSaveEpoch >= minSec;
 }
+
+bool hist_file_ok(int n, int head, int cap, int dayN, int maxDays) {
+    if (cap <= 0) return false;
+    if (n < 0 || n > cap) return false;
+    if (head < 0 || head >= cap) return false;
+    if (maxDays >= 0 && (dayN < 0 || dayN > maxDays)) return false;
+    return true;
+}

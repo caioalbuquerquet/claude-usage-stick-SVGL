@@ -126,23 +126,35 @@ void hist_load(int slot, AccountState& a) {
   if (magic == HIST_MAGIC_V2) {
     static HistFileV2 hf;
     if (f.read((uint8_t *)&hf, sizeof(hf)) == (int)sizeof(hf)) {
-      a.histN = hf.n; a.histHead = hf.head;
-      memcpy(a.hist, hf.hist, sizeof(a.hist));
-      memcpy(a.hourBurn, hf.hourBurn, sizeof(a.hourBurn));
-      a.lastH5 = hf.lastH5;
-      a.dayN = (hf.dayN >= 0 && hf.dayN <= NDAYS) ? hf.dayN : 0;
-      memcpy(a.days, hf.days, sizeof(a.days));
+      if (!hist_file_ok(hf.n, hf.head, HIST_MAX, hf.dayN, NDAYS)) {
+        Serial.printf("[HIST] slot %d: %s corrompido (n=%d head=%d dayN=%d) -> vazio\n",
+                      slot, pth, hf.n, hf.head, hf.dayN);
+        hist_reset_ram(a);
+      } else {
+        a.histN = hf.n; a.histHead = hf.head;
+        memcpy(a.hist, hf.hist, sizeof(a.hist));
+        memcpy(a.hourBurn, hf.hourBurn, sizeof(a.hourBurn));
+        a.lastH5 = hf.lastH5;
+        a.dayN = hf.dayN;
+        memcpy(a.days, hf.days, sizeof(a.days));
+      }
     }
   } else if (magic == HIST_MAGIC_V1) {
     static HistFileV1 hf;
     if (f.read((uint8_t *)&hf, sizeof(hf)) == (int)sizeof(hf)) {
-      int n = (hf.n > HIST_MAX_V1) ? HIST_MAX_V1 : hf.n;
-      for (int i = 0; i < n; i++)
-        a.hist[i] = hf.hist[(hf.head - n + i + HIST_MAX_V1 * 2) % HIST_MAX_V1];
-      a.histN = n; a.histHead = n % HIST_MAX;
-      memcpy(a.hourBurn, hf.hourBurn, sizeof(a.hourBurn));
-      a.lastH5 = hf.lastH5;
-      Serial.println("[HIST] migrado v1 -> v2");
+      if (!hist_file_ok(hf.n, hf.head, HIST_MAX_V1, 0, -1)) {
+        Serial.printf("[HIST] slot %d: %s v1 corrompido (n=%d head=%d) -> vazio\n",
+                      slot, pth, hf.n, hf.head);
+        hist_reset_ram(a);
+      } else {
+        int n = hf.n;                          // <= HIST_MAX_V1 < HIST_MAX
+        for (int i = 0; i < n; i++)
+          a.hist[i] = hf.hist[(hf.head - n + i + HIST_MAX_V1 * 2) % HIST_MAX_V1];
+        a.histN = n; a.histHead = n % HIST_MAX;
+        memcpy(a.hourBurn, hf.hourBurn, sizeof(a.hourBurn));
+        a.lastH5 = hf.lastH5;
+        Serial.println("[HIST] migrado v1 -> v2");
+      }
     }
   }
   f.close();
