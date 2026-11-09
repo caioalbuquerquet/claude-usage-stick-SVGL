@@ -12,7 +12,8 @@
  * bridge opcional (tools/token_bridge.py) soma os transcripts locais do
  * Claude Code e faz POST /tokens neste device (mDNS claude-stick.local).
  *
- * Sem botao fisico: navegacao 100% touch (swipe entre telas + slideshow).
+ * Sem botao fisico: navegacao 100% touch. Depois do desbloqueio a tela e o
+ * shell fixo (src/ui/shell) e o menu (src/ui/overlay_menu) troca o conteudo.
  * Init de display/touch validado no bring-up (ver REFERENCIA-HARDWARE-LVGL.md).
  */
 #include <Arduino.h>
@@ -39,9 +40,12 @@
 #include "net/scheduler.h"
 #include "net/token_store.h"
 #include "app/web_api.h"
+#include "app/app_state.h"
+#include "ui/shell.h"
+#include "ui/overlay_menu.h"
 #include "hw/frame_stats.h"
 #include "ui/i18n.h"
-#include "ui/theme.h"         // fase 3: tema THEP (as telas ainda usam a paleta abaixo)
+#include "ui/theme.h"         // fase 3: tema THEP (shell e menu; as telas ainda usam a paleta abaixo)
 #include <mbedtls/platform_util.h>
 #include "logo_assets.h"   // Clawd + logotipo oficiais (gerado por tools/gen_logo_assets.py)
 #include "clawd_dead.h"    // Clawd "morto" do dialog de incidente (gerado por tools/gen_dead_clawd.py)
@@ -72,16 +76,7 @@ AXS15231B_Touch touch_dev(TOUCH_SCL, TOUCH_SDA, TOUCH_INT, TOUCH_ADDR, TOUCH_ROT
 WiFiManager g_wifi;
 Preferences g_prefs;
 
-// ---- Estado da aplicação ----
-enum State {
-  ST_BOOT, ST_PIN, ST_SETUP_PIN, ST_WIFI, ST_TOKEN,
-  ST_MAIN, ST_SETTINGS, ST_ACCOUNTS, ST_ACCT_NAME, ST_ABOUT
-};
-static State g_state = ST_BOOT;
-static State g_pending = ST_BOOT;
-static bool  g_dirty = false;
-static bool  g_uiDirty = false;   // chegou resultado da net_task: refresh_ui_values() em ST_MAIN
-static void request_state(State s) { g_pending = s; g_dirty = true; }
+// ---- Estado da aplicação: src/app/app_state (AppState, ContentId, intenções) ----
 
 // ---- Dados: g_status e g_models[] ficam em src/model/account_state ----
 
@@ -109,18 +104,13 @@ static uint32_t g_lockoutUntil = 0;          // millis até liberar nova tentati
 static bool g_lockPainted = false;           // aviso ja esta em vermelho
 static int  g_lockSecs = -1;                 // ultimo segundo renderizado
 
-static lv_obj_t *g_hdrStatus = nullptr;   // texto de status no cabeçalho do dashboard
-
 // ---- Brilho ----
 static const uint8_t BRI_LEVELS[3] = {60, 160, 255};
 static int g_briIdx = 1;
 
 int g_pollSec = DEFAULT_POLL_SEC;         // intervalo de atualização (config, NVS); lido pelo agendador
 int g_tzOffset = -3;                      // fuso GMT (horas), config NVS
-static int g_slideSec = 0;                // slideshow: 0=off, 5/10/15/30s (config, NVS)
 static int g_heatMode = 3;                // 0=hoje 1=7d 2=30d 3=tudo (config, NVS)
-static uint32_t g_lastTouchMs = 0;        // ultimo toque (pausa o slideshow)
-static uint32_t g_lastSlideMs = 0;
 
 // ---- Histórico / heatmap: src/model/history.{h,cpp} ----
 
@@ -131,11 +121,9 @@ static Mascot g_masc[NMODELS];
 static int g_mascN = 0;
 static lv_point_precise_t g_mXPts[NMODELS][4][2];   // olhos em X (mood 3)
 
-// ---- Ponteiros de UI do dashboard (zerados a cada build de ST_MAIN) ----
-#define NTILES 4
-#define NSEG 18                       // segmentos do medidor de janela
+// ---- Ponteiros dos conteúdos do shell (zerados a cada troca de conteúdo) ----
+#define NSEG 18                       // segmentos do medidor do momento
 struct DashUI {
-  lv_obj_t *tv, *tile[NTILES], *dots[NTILES];
   // agora: uma coluna por slot salvo (fase 2, item 24)
   struct Col { lv_obj_t *card, *name, *pct, *bar, *l5, *l7, *st; int slot; } col[ACCT_MAX];
   int colN;
@@ -149,26 +137,16 @@ struct DashUI {
 };
 static DashUI g_ui;
 static lv_obj_t *g_pinDots = nullptr, *g_pinMsg = nullptr;
-static int g_curTile = 0;
 
 // pontos das linhas do gráfico de tendência (precisam persistir)
 static lv_point_precise_t g_trPts[HIST_MAX];
 static lv_point_precise_t g_trProjPts[2];
 
 // ---- Forward declarations ----
-static void render_state();
-static void refresh_ui_values();
-static void dash_tick();
-static void set_hdr_status();
 static void ui_pin();
 static void pin_lock_tick();
-static void ui_wifi();
-static void ui_token();
-static void ui_main();
-static void ui_settings();
-static void ui_accounts();
-static void ui_account_name();
-static void nav_cb(lv_event_t *e);
+static void ui_wifi(lv_obj_t *scr);
+static void ui_token(lv_obj_t *scr);
 static void trend_redraw();
 static void heat_redraw();
 static void update_tok_row();
@@ -237,7 +215,6 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     touch_dev.readData(&x, &y);
     data->point.x = x; data->point.y = y;
     data->state = LV_INDEV_STATE_PRESSED;
-    g_lastTouchMs = millis();          // pausa o slideshow enquanto ha interacao
   } else {
     data->state = LV_INDEV_STATE_RELEASED;
   }
@@ -269,7 +246,7 @@ static void no_box(lv_obj_t *o) {
   lv_obj_set_style_pad_all(o, 0, 0);
   lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
 }
-// Botão pílula com label centralizado; user_data leva o State alvo (nav_cb).
+// Botão pílula com label centralizado.
 static lv_obj_t *mkbtn(lv_obj_t *p, const char *txt, const lv_font_t *font,
                        uint32_t bg, uint32_t fg) {
   lv_obj_t *b = lv_button_create(p);
@@ -340,9 +317,7 @@ static void load_persisted() {
   if (g_pollSec < MIN_POLL_SEC || g_pollSec > MAX_POLL_SEC) g_pollSec = DEFAULT_POLL_SEC;
   g_tzOffset = g_prefs.getInt("tz", -3);
   if (g_tzOffset < -12 || g_tzOffset > 14) g_tzOffset = -3;
-  g_slideSec = g_prefs.getInt("slide", 0);
-  if (g_slideSec != 0 && g_slideSec != 5 && g_slideSec != 10 &&
-      g_slideSec != 15 && g_slideSec != 30) g_slideSec = 0;
+  // A chave "slide" (slideshow da v2.3) não é mais lida nem apagada (G8).
   g_heatMode = g_prefs.getInt("heatm", 3);
   if (g_heatMode < 0 || g_heatMode > 3) g_heatMode = 3;
   g_lang = g_prefs.getInt("lang", 0) ? 1 : 0;
@@ -447,11 +422,11 @@ static void session_open() {
   g_unlocked = true;
   web_start_session();
   scheduler_start();
-  request_state(ST_MAIN);
+  request_state(ST_SHELL);           // shell + /agora
 }
 
 static void pin_submit() {
-  if (g_state == ST_SETUP_PIN) {
+  if (app_state() == ST_SETUP_PIN) {
     if (!g_pinConfirming) {
       strlcpy(g_pinFirst, g_pinEntry, sizeof(g_pinFirst));
       g_pinConfirming = true;
@@ -573,7 +548,7 @@ static void pin_kb_cb(lv_event_t *e) {
 
 static void ui_pin() {
   lv_obj_t *scr = lv_screen_active();
-  const char *title = (g_state == ST_SETUP_PIN)
+  const char *title = (app_state() == ST_SETUP_PIN)
     ? (g_pinConfirming ? TRS("Confirme o PIN", "Confirm the PIN") : TRS("Defina um PIN", "Set a PIN"))
     : TRS("Digite o PIN", "Enter the PIN");
   lv_obj_t *t = mklabel(scr, title, &lv_font_montserrat_22, C_TEXT);
@@ -583,7 +558,7 @@ static void ui_pin() {
   lv_obj_align(g_pinDots, LV_ALIGN_TOP_MID, 0, 48);
   pin_update_dots();
 
-  const char *sub = (g_state == ST_SETUP_PIN)
+  const char *sub = (app_state() == ST_SETUP_PIN)
     ? TRS("Voce vai digita-lo a cada boot.", "You'll type it on every boot.")
     : TRS("Necessario para desbloquear o token.", "Needed to unlock the token.");
   g_pinMsg = mklabel(scr, sub, &lv_font_montserrat_14, C_MUTED);
@@ -650,7 +625,11 @@ static void wifi_kb_cb(lv_event_t *e) {
     lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
     lv_refr_now(NULL);
     bool ok = g_wifi.connectTo(sel_ssid, pass, 15000);
-    if (ok) { ensure_mdns(); request_state(g_onboarding ? ST_TOKEN : ST_MAIN); }
+    if (ok) {
+      ensure_mdns();
+      if (session_unlocked()) shell_show(ContentId::HOME);
+      else request_state(ST_TOKEN);
+    }
     else { lv_label_set_text(wifi_status, TRS("Falhou. Toque numa rede de novo.", "Failed. Tap a network again.")); lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN); }
   } else if (code == LV_EVENT_CANCEL) {
     lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
@@ -661,20 +640,25 @@ static void wifi_kb_cb(lv_event_t *e) {
 }
 static void wifi_rescan_cb(lv_event_t *e) { (void)e; wifi_populate(); }
 
-static void ui_wifi() {
-  lv_obj_t *scr = lv_screen_active();
-  lv_obj_t *title = mklabel(scr, TRS("Configurar WiFi", "Configure WiFi"), &lv_font_montserrat_20, C_TEXT);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 12);
+// Tela cheia no onboarding (scr = lv_screen_active()) ou conteúdo WIFI do
+// shell na sessão (scr = shell_content(), 438 x 214; o teclado vai para a
+// camada flutuante do shell, com a largura da tela).
+static void ui_wifi(lv_obj_t *scr) {
+  const bool inShell = session_unlocked() && shell_is_up();
+  const int W = inShell ? SHELL_CONTENT_W : 452;
+  const int X = inShell ? 0 : 14;          // margem esquerda dos textos
+  const int TOP = inShell ? 0 : 8;         // topo dos botões
 
-  // Sessão: o agendador já está pausado (render_state); espera o job em
-  // andamento terminar antes de escanear. O loop() reabre a tela quando
-  // poller_idle() ficar verdadeiro.
-  g_wifiWaiting = session_unlocked() && !poller_idle();
+  if (!inShell) {
+    lv_obj_t *title = mklabel(scr, TRS("Configurar WiFi", "Configure WiFi"), &lv_font_montserrat_20, C_TEXT);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 12);
+  }
+
+  // Sessão: o agendador já está pausado (app_state, ao abrir WIFI); espera o
+  // job em andamento terminar antes de escanear. O tick do conteúdo reabre a
+  // tela quando poller_idle() ficar verdadeiro.
+  g_wifiWaiting = inShell && !poller_idle();
   if (g_wifiWaiting) {
-    lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                         &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-    lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
     lv_obj_t *w = mklabel(scr, TRS("aguardando a rede...", "waiting for the network..."),
                           &lv_font_montserrat_16, C_MUTED);
     lv_obj_align(w, LV_ALIGN_CENTER, 0, 0);
@@ -682,22 +666,15 @@ static void ui_wifi() {
   }
 
   lv_obj_t *rb = mkbtn(scr, TRS("Reescanear", "Rescan"), &lv_font_montserrat_14, C_SURFACE2, C_ACCENT);
-  lv_obj_align(rb, LV_ALIGN_TOP_RIGHT, -12, 8);
+  lv_obj_align(rb, LV_ALIGN_TOP_RIGHT, inShell ? 0 : -12, TOP);
   lv_obj_add_event_cb(rb, wifi_rescan_cb, LV_EVENT_CLICKED, NULL);
 
-  if (!g_onboarding && session_unlocked()) {
-    lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                         &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-    lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -150, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
-  }
-
   wifi_status = mklabel(scr, "...", &lv_font_montserrat_14, C_MUTED);
-  lv_obj_align(wifi_status, LV_ALIGN_TOP_LEFT, 14, 44);
+  lv_obj_align(wifi_status, LV_ALIGN_TOP_LEFT, X, inShell ? 10 : 44);
 
   wifi_list = lv_list_create(scr);
-  lv_obj_set_size(wifi_list, 452, 246);
-  lv_obj_align(wifi_list, LV_ALIGN_TOP_MID, 0, 68);
+  lv_obj_set_size(wifi_list, W, inShell ? SHELL_CONTENT_H - 44 : 246);
+  lv_obj_align(wifi_list, LV_ALIGN_TOP_MID, 0, inShell ? 44 : 68);
   lv_obj_set_style_bg_color(wifi_list, lv_color_hex(C_BG), 0);
   lv_obj_set_style_border_color(wifi_list, lv_color_hex(C_BORDER), 0);
   // clique é anexado por botão em wifi_populate()
@@ -706,15 +683,20 @@ static void ui_wifi() {
   lv_textarea_set_one_line(wifi_ta, true);
   lv_textarea_set_password_mode(wifi_ta, true);
   lv_textarea_set_placeholder_text(wifi_ta, TRS("senha do WiFi", "WiFi password"));
-  lv_obj_set_size(wifi_ta, 452, 44);
-  lv_obj_align(wifi_ta, LV_ALIGN_TOP_MID, 0, 66);
+  lv_obj_set_size(wifi_ta, W, 44);
+  lv_obj_align(wifi_ta, LV_ALIGN_TOP_MID, 0, inShell ? 40 : 66);
   lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
 
-  wifi_kb = lv_keyboard_create(scr);
+  wifi_kb = lv_keyboard_create(inShell ? shell_float() : scr);
   lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_event_cb(wifi_kb, wifi_kb_cb, LV_EVENT_ALL, NULL);
 
   wifi_populate();
+}
+
+// Conteúdo WIFI: reabre quando a net_task terminou o job em andamento.
+static void wifi_content_tick() {
+  if (g_wifiWaiting && poller_idle()) { g_wifiWaiting = false; shell_show(ContentId::WIFI); }
 }
 
 // ============================================================
@@ -745,36 +727,34 @@ static lv_obj_t *build_claude_mark(lv_obj_t *parent) {
   return img;
 }
 
-static void ui_token() {
-  lv_obj_t *scr = lv_screen_active();
+// Tela cheia no onboarding (scr = lv_screen_active()) ou conteúdo TOKEN do
+// shell na sessão (scr = shell_content(); sem o Clawd, que não cabe no painel).
+static void ui_token(lv_obj_t *scr) {
+  const bool inShell = session_unlocked() && shell_is_up();
+  const int dy = inShell ? -104 : 0;       // no painel, tudo sobe o lugar do Clawd
 
-  if (session_unlocked()) {
-    lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                         &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-    lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 8);
-    lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
+  if (!inShell) {
+    lv_obj_t *mark = build_claude_mark(scr);
+    lv_obj_align(mark, LV_ALIGN_TOP_MID, 0, 8);
   }
-
-  lv_obj_t *mark = build_claude_mark(scr);
-  lv_obj_align(mark, LV_ALIGN_TOP_MID, 0, 8);
 
   lv_obj_t *cap = mklabel(scr, TRS("Cole o token pelo navegador, em:",
                                    "Paste the token via browser, at:"), &lv_font_montserrat_16, C_MUTED);
-  lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 108);
+  lv_obj_align(cap, LV_ALIGN_TOP_MID, 0, 108 + dy);
 
   String url = String("http://") + WiFi.localIP().toString();
   lv_obj_t *ip = mklabel(scr, url.c_str(), &lv_font_montserrat_28, C_ACCENT);
-  lv_obj_align(ip, LV_ALIGN_TOP_MID, 0, 132);
+  lv_obj_align(ip, LV_ALIGN_TOP_MID, 0, 132 + dy);
 
   lv_obj_t *hint = mklabel(scr, TRS("abra esse endereco no PC/celular na MESMA rede WiFi",
                                     "open this address on a PC/phone on the SAME WiFi"),
                            &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 174);
+  lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 174 + dy);
 
   lv_obj_t *sp = lv_spinner_create(scr);
   lv_spinner_set_anim_params(sp, 1200, 70);
   lv_obj_set_size(sp, 36, 36);
-  lv_obj_align(sp, LV_ALIGN_BOTTOM_MID, 0, -46);
+  lv_obj_align(sp, LV_ALIGN_BOTTOM_MID, 0, inShell ? -30 : -46);
   lv_obj_set_style_arc_color(sp, lv_color_hex(C_SURFACE2), LV_PART_MAIN);
   lv_obj_set_style_arc_color(sp, lv_color_hex(C_ACCENT), LV_PART_INDICATOR);
   lv_obj_set_style_arc_width(sp, 5, LV_PART_MAIN);
@@ -785,7 +765,7 @@ static void ui_token() {
 
   // Item 6: a sessão já tem servidor (web_start_session); o onboarding sobe o
   // dele aqui, se ainda não houver. A validação é assíncrona (VALIDATE).
-  web_token_begin();
+  // web_token_begin() é chamado pelo app_state ao abrir ST_TOKEN ou TOKEN.
   if (!session_unlocked() && !web_running()) web_start_onboarding();
 }
 
@@ -815,7 +795,7 @@ static void on_validate_result(const NetResult &r) {
     g_pinConfirming = false; g_pinFirst[0] = 0; g_pinEntry[0] = 0;
     Serial.println("[TOKEN] validado; defina o PIN");
     web_token_msg_cb(TRS("token OK! defina o PIN", "token OK! set the PIN"));
-    if (g_state == ST_TOKEN) request_state(ST_SETUP_PIN);
+    if (app_state() == ST_TOKEN) request_state(ST_SETUP_PIN);
     return;
   }
 
@@ -847,14 +827,14 @@ static void on_validate_result(const NetResult &r) {
   web_token_set_result(true, nullptr);
   Serial.printf("[ACCT] token %s no slot %d (%s)\n", replacing ? "trocado" : "adicionado",
                 slot, g_accts.label[slot]);
-  request_state(ST_MAIN);
+  shell_show(ContentId::HOME);
   scheduler_request_refresh();
 }
 
 // ============================================================
 // Dashboard — helpers visuais
 // ============================================================
-// label posicionado vazio (preenchido em refresh_ui_values/dash_tick)
+// label posicionado vazio (preenchido no refresh/tick do conteúdo)
 static lv_obj_t *tlabel(lv_obj_t *p, const lv_font_t *f, uint32_t c, int x, int y) {
   lv_obj_t *l = lv_label_create(p);
   lv_obj_set_style_text_font(l, f, 0);
@@ -867,12 +847,6 @@ static lv_obj_t *tstatic(lv_obj_t *p, const char *txt, const lv_font_t *f, uint3
   lv_obj_t *l = mklabel(p, txt, f, c);
   lv_obj_set_pos(l, x, y);
   return l;
-}
-static void tile_setup(lv_obj_t *t) {
-  lv_obj_set_style_bg_opa(t, 0, 0);
-  lv_obj_set_style_border_width(t, 0, 0);
-  lv_obj_set_style_pad_all(t, 0, 0);
-  lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
 }
 // card moderno: superfície arredondada SEM borda (estrutura por cor, não caixa)
 static lv_obj_t *card(lv_obj_t *p, int x, int y, int w, int h) {
@@ -1028,11 +1002,12 @@ static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
 }
 
 // ============================================================
-// Builders dos 4 tiles
+// Conteúdos do shell com o visual da v2.3 (fase 3, onda 2). Cada um monta
+// dentro do painel (438 x 214); o novo visual vem com src/ui/screen_*.
 // ============================================================
-// Tile 0 — AGORA (fase 2, item 24): uma coluna por slot salvo (1 a 4 colunas
+// /agora (fase 2, item 24): uma coluna por slot salvo (1 a 4 colunas
 // iguais) com a % da 5h, os resets, a semana e a linha de estado/projeção.
-// Ainda no visual da v2.3; o screen_home da fase 3 substitui esta tela.
+// O screen_home da fase 3 substitui esta tela.
 // Fontes por número de colunas (tabela do item 24).
 static const lv_font_t *col_pct_font(int n) {
   return n <= 1 ? &lv_font_montserrat_48 : n == 2 ? &lv_font_montserrat_40
@@ -1043,11 +1018,7 @@ static const lv_font_t *col_txt_font(int n) {
 }
 // Tocar no card de uma conta muda o foco (Technical Plan §3).
 static void col_click_cb(lv_event_t *e) {
-  int slot = (int)(intptr_t)lv_event_get_user_data(e);
-  if (slot == g_accts.active || slot < 0 || slot >= ACCT_MAX || !g_accts.used[slot]) return;
-  accountSetActive(g_prefs, g_accts, slot);
-  Serial.printf("[ACCT] foco -> slot %d (%s)\n", slot, g_accts.label[slot]);
-  request_state(ST_MAIN);
+  intent_focus((int)(intptr_t)lv_event_get_user_data(e));
 }
 static lv_obj_t *col_label(lv_obj_t *p, const lv_font_t *f, uint32_t c, lv_label_long_mode_t mode) {
   lv_obj_t *l = lv_label_create(p);
@@ -1062,7 +1033,7 @@ static void build_tile_agora(lv_obj_t *t) {
   int n = 0;
   for (int s = 0; s < ACCT_MAX; s++) if (g_accts.used[s]) n++;
   if (n == 0) return;
-  const int GAP = 8, X0 = 8, W = 464, H = 212;
+  const int GAP = 8, X0 = 0, W = SHELL_CONTENT_W, H = 196;
   int w = (W - GAP * (n - 1)) / n;
   const lv_font_t *fp = col_pct_font(n), *ft = col_txt_font(n);
   g_ui.colN = 0;
@@ -1071,7 +1042,7 @@ static void build_tile_agora(lv_obj_t *t) {
     int i = g_ui.colN++;
     auto &c = g_ui.col[i];
     c.slot = s;
-    c.card = card(t, X0 + i * (w + GAP), 4, w, H);
+    c.card = card(t, X0 + i * (w + GAP), 0, w, H);
     lv_obj_set_style_pad_all(c.card, n >= 3 ? 8 : 12, 0);
     lv_obj_set_flex_flow(c.card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(c.card, n >= 3 ? 3 : 5, 0);
@@ -1099,14 +1070,15 @@ static void build_tile_agora(lv_obj_t *t) {
     c.st = col_label(c.card, ft, C_MUTED, LV_LABEL_LONG_WRAP);
   }
   // tokens da sessão da conta em foco (bridge), no rodapé
-  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 8, 224);
-  lv_obj_set_width(g_ui.agTok, 464);
+  g_ui.agTok = tlabel(t, &lv_font_montserrat_12, C_MUTED, 0, 200);
+  lv_obj_set_width(g_ui.agTok, SHELL_CONTENT_W);
   lv_obj_set_style_text_align(g_ui.agTok, LV_TEXT_ALIGN_RIGHT, 0);
 }
-// Tile 1 — MODELOS: Clawd oficial por modelo (humor animado) + sonda real.
-// Incidentes nao aparecem mais aqui: viraram o dialog da tela inicial.
+// /modelos: Clawd oficial por modelo (humor animado) + sonda real.
+// Incidentes nao aparecem aqui: viram o dialog sobre o shell.
+static const int MODEL_CX[NMODELS] = {54, 164, 274, 384};   // centros no painel de 438 px
 static void build_tile_models(lv_obj_t *t) {
-  static const int CENTERS[NMODELS] = {60, 180, 300, 420};
+  const int *CENTERS = MODEL_CX;
   for (int i = 0; i < NMODELS; i++) {
     build_model_mascot(t, CENTERS[i], i);
     lv_obj_t *n = mklabel(t, g_models[i].name, &lv_font_montserrat_16,
@@ -1118,13 +1090,13 @@ static void build_tile_models(lv_obj_t *t) {
   }
   tstatic(t, TRS("sonda real na API \xE2\x80\xA2 1 modelo por ciclo",
                  "live API probe \xE2\x80\xA2 1 model per cycle"),
-          &lv_font_montserrat_12, C_FAINT, 14, 170);
+          &lv_font_montserrat_12, C_FAINT, 0, 176);
 }
-// Tile 2 — JANELA 5H: histórico + projeção pontilhada até esgotar.
+// /janela: histórico + projeção pontilhada até esgotar.
 #define TR_X0 12
 #define TR_Y0 10
-#define TR_W  440
-#define TR_H  126
+#define TR_W  406
+#define TR_H  100
 static int tr_x(uint32_t tt, uint32_t ws, uint32_t we) {
   if (we <= ws) return TR_X0;
   long long v = (long long)(tt - ws) * TR_W / (long long)(we - ws);
@@ -1136,10 +1108,10 @@ static int tr_y(float p) {
   return TR_Y0 + TR_H - (int)(p * TR_H / 100.0f);
 }
 static void build_tile_trend(lv_obj_t *t) {
-  tstatic(t, TRS("Janela de 5h", "5-hour window"), &lv_font_montserrat_16, C_TEXT, 14, 2);
-  tstatic(t, TRS("uso real + projecao", "real usage + projection"), &lv_font_montserrat_12, C_FAINT, 320, 6);
+  tstatic(t, TRS("Janela de 5h", "5-hour window"), &lv_font_montserrat_16, C_TEXT, 0, 0);
+  tstatic(t, TRS("uso real + projecao", "real usage + projection"), &lv_font_montserrat_12, C_FAINT, 300, 4);
 
-  lv_obj_t *c = card(t, 8, 26, 464, 170);
+  lv_obj_t *c = card(t, 0, 22, SHELL_CONTENT_W, 146);
   lv_obj_set_style_pad_all(c, 0, 0);
 
   // grade: 25/50/75%
@@ -1174,11 +1146,12 @@ static void build_tile_trend(lv_obj_t *t) {
   g_ui.trT0 = tlabel(c, &lv_font_montserrat_12, C_FAINT, TR_X0, TR_Y0 + TR_H + 8);
   g_ui.trT1 = tlabel(c, &lv_font_montserrat_12, C_FAINT, TR_X0 + TR_W - 40, TR_Y0 + TR_H + 8);
 
-  g_ui.trCap = tlabel(t, &lv_font_montserrat_16, C_MUTED, 14, 210);
-  lv_obj_set_width(g_ui.trCap, 452);
+  g_ui.trCap = tlabel(t, &lv_font_montserrat_14, C_MUTED, 0, 174);
+  lv_obj_set_width(g_ui.trCap, SHELL_CONTENT_W);
   lv_label_set_long_mode(g_ui.trCap, LV_LABEL_LONG_WRAP);
 }
-// Tile 3 — RITMO: heatmap por hora com filtro de período.
+// /ritmo: heatmap por hora com filtro de período.
+#define HEAT_BASE_Y 164                     // base das barras no painel
 static void heat_btn_style() {
   const char *names[4] = {TRS("Hoje", "Today"), "7d", "30d", TRS("Tudo", "All")};
   for (int i = 0; i < 4; i++) {
@@ -1201,11 +1174,11 @@ static void heat_btn_cb(lv_event_t *e) {
   heat_redraw();
 }
 static void build_tile_heat(lv_obj_t *t) {
-  tstatic(t, TRS("Ritmo por hora", "Hourly rhythm"), &lv_font_montserrat_16, C_TEXT, 14, 6);
+  tstatic(t, TRS("Ritmo por hora", "Hourly rhythm"), &lv_font_montserrat_16, C_TEXT, 0, 6);
   for (int i = 0; i < 4; i++) {
     lv_obj_t *b = lv_button_create(t);
     lv_obj_set_size(b, 52, 30);
-    lv_obj_set_pos(b, 246 + i * 56, 0);
+    lv_obj_set_pos(b, 214 + i * 56, 0);
     lv_obj_set_style_radius(b, 15, 0);
     lv_obj_set_style_shadow_width(b, 0, 0);
     lv_obj_set_ext_click_area(b, 6);
@@ -1218,7 +1191,7 @@ static void build_tile_heat(lv_obj_t *t) {
   for (int h = 0; h < 24; h++) {
     lv_obj_t *bar = lv_obj_create(t);
     lv_obj_set_size(bar, 13, 4);
-    lv_obj_set_pos(bar, 18 + h * 18, 176);
+    lv_obj_set_pos(bar, 4 + h * 18, HEAT_BASE_Y);
     lv_obj_set_style_radius(bar, 3, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(C_ACCENT), 0);
     lv_obj_set_style_border_width(bar, 0, 0);
@@ -1229,33 +1202,31 @@ static void build_tile_heat(lv_obj_t *t) {
   for (int i = 0; i < 5; i++) {
     int h = ticks[i]; char s[4]; snprintf(s, sizeof(s), "%dh", h);
     lv_obj_t *l = mklabel(t, s, &lv_font_montserrat_12, C_MUTED);
-    lv_obj_set_pos(l, 14 + h * 18, 186);
+    lv_obj_set_pos(l, h * 18, HEAT_BASE_Y + 6);
   }
   tstatic(t, TRS("quota da janela 5h queimada em cada hora local",
-                 "5h-window quota burned per local hour"), &lv_font_montserrat_12, C_FAINT, 14, 214);
-}
-
-static void on_tile_changed(lv_event_t *e) {
-  (void)e;
-  if (!g_ui.tv) return;
-  lv_obj_t *act = lv_tileview_get_tile_active(g_ui.tv);
-  for (int i = 0; i < NTILES; i++) {
-    if (!g_ui.dots[i]) continue;
-    bool on = (g_ui.tile[i] == act);
-    if (on) g_curTile = i;
-    lv_obj_set_style_bg_color(g_ui.dots[i], lv_color_hex(on ? C_ACCENT : C_BORDER), 0);
-    lv_obj_set_width(g_ui.dots[i], on ? 18 : 8);
-  }
+                 "5h-window quota burned per local hour"), &lv_font_montserrat_12, C_FAINT, 0, HEAT_BASE_Y + 28);
 }
 
 // ============================================================
 // Atualização de valores
 // ============================================================
+// Os valores de /agora são reescritos a cada segundo: só invalidam o objeto
+// quando o texto ou a cor mudam (no modo FULL cada invalidação custa um
+// quadro inteiro; ver hw/frame_stats.h).
+static void lbl_set(lv_obj_t *l, const char *t) {
+  if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
+}
+static void lbl_color(lv_obj_t *l, lv_color_t c) {
+  if (!lv_color_eq(lv_obj_get_style_text_color(l, LV_PART_MAIN), c))
+    lv_obj_set_style_text_color(l, c, 0);
+}
+
 static void update_tok_row() {
   if (!g_ui.agTok) return;
   const TokenStats &tok = acct[g_accts.active].tok;
   if (tok.atMs == 0 || millis() - tok.atMs > TOK_FRESH_MS) {
-    lv_label_set_text(g_ui.agTok, "");
+    lbl_set(g_ui.agTok, "");
     return;
   }
   char a[16], b[16], s[96];
@@ -1263,7 +1234,7 @@ static void update_tok_row() {
   fmt_tok(tok.tout, b, sizeof(b));
   snprintf(s, sizeof(s), TRS("tokens na janela: %s entrada \xE2\x80\xA2 %s saida",
                              "window tokens: %s in \xE2\x80\xA2 %s out"), a, b);
-  lv_label_set_text(g_ui.agTok, s);
+  lbl_set(g_ui.agTok, s);
 }
 
 // Projeção curta da coluna (ASCII: as Montserrat de hoje não têm ✓ ✗ ·; o
@@ -1329,38 +1300,37 @@ static void col_update(int i) {
   } else {
     col_proj_text(a, narrow, st, sizeof(st), &stCol);
   }
-  lv_label_set_text(c.st, st);
-  lv_obj_set_style_text_color(c.st, lv_color_hex(stCol), 0);
+  lbl_set(c.st, st);
+  lbl_color(c.st, lv_color_hex(stCol));
 
   const UsageData &u = a.usage;
   if (!showData) {
-    lv_label_set_text(c.pct, "--%");
-    lv_obj_set_style_text_color(c.pct, lv_color_hex(C_FAINT), 0);
+    lbl_set(c.pct, "--%");
+    lbl_color(c.pct, lv_color_hex(C_FAINT));
     lv_bar_set_value(c.bar, 0, LV_ANIM_OFF);
-    lv_label_set_text(c.l5, narrow ? "5h --" : TRS("5h: --", "5h: --"));
-    lv_label_set_text(c.l7, narrow ? "7d --" : TRS("semana: --", "week: --"));
+    lbl_set(c.l5, narrow ? "5h --" : TRS("5h: --", "5h: --"));
+    lbl_set(c.l7, narrow ? "7d --" : TRS("semana: --", "week: --"));
     return;
   }
   snprintf(b, sizeof(b), "%d%%", (int)(u.h5 + 0.5f));
-  lv_label_set_text(c.pct, b);
+  lbl_set(c.pct, b);
   lv_color_t gc = grad_color(u.h5);
-  lv_obj_set_style_text_color(c.pct, gc, 0);
+  lbl_color(c.pct, gc);
   lv_bar_set_value(c.bar, (int32_t)(u.h5 + 0.5f), LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(c.bar, gc, LV_PART_INDICATOR);
+  if (!lv_color_eq(lv_obj_get_style_bg_color(c.bar, LV_PART_INDICATOR), gc))
+    lv_obj_set_style_bg_color(c.bar, gc, LV_PART_INDICATOR);
   fmt_eta(u.h5ResetEpoch, e, sizeof(e));
   snprintf(b, sizeof(b), narrow ? "5h %s" : TRS("5h: reseta em %s", "5h: resets in %s"), e);
-  lv_label_set_text(c.l5, b);
+  lbl_set(c.l5, b);
   fmt_eta(u.d7ResetEpoch, e, sizeof(e));
   snprintf(b, sizeof(b), narrow ? "7d %d%% \xE2\x80\xA2 %s" : TRS("semana: %d%% \xE2\x80\xA2 %s", "week: %d%% \xE2\x80\xA2 %s"),
            (int)(u.d7 + 0.5f), e);
-  lv_label_set_text(c.l7, b);
+  lbl_set(c.l7, b);
 }
 
 // Contadores, idades e projeções (1s) — separado da chegada de resultados.
-static void dash_tick() {
-  if (g_state != ST_MAIN) return;
+static void home_cols_update() {
   for (int i = 0; i < g_ui.colN; i++) col_update(i);
-  set_hdr_status();
 }
 
 // Tendência da janela 5h: histórico + projeção pontilhada até esgotar.
@@ -1474,9 +1444,9 @@ static void heat_redraw() {
   for (int h = 0; h < 24; h++) {
     if (!g_ui.heat[h]) continue;
     float r = data[h] / mx; if (r < 0) r = 0; if (r > 1) r = 1;
-    int hgt = 4 + (int)(r * 114);
+    int hgt = 4 + (int)(r * 108);
     lv_obj_set_size(g_ui.heat[h], 13, hgt);
-    lv_obj_set_y(g_ui.heat[h], 176 - hgt);
+    lv_obj_set_y(g_ui.heat[h], HEAT_BASE_Y - hgt);
     lv_obj_set_style_bg_color(g_ui.heat[h], lv_color_hex(h == curHour ? C_TEXT : C_ACCENT), 0);
     lv_obj_set_style_bg_opa(g_ui.heat[h], (lv_opa_t)(70 + (int)(r * 185)), 0);
   }
@@ -1505,14 +1475,14 @@ static void moment_close() {
   memset(&g_mo, 0, sizeof(g_mo));
 }
 // Fechar pelo toque ou pelo tempo mostra o próximo momento guardado pelo
-// agendador (moment_flush). moment_close() sozinho não chama: render_state()
+// agendador (moment_flush). moment_close() sozinho não chama: ui_reset()
 // e show_moment() também o usam para limpar a tela.
 static void moment_close_cb(lv_event_t *e) { (void)e; moment_close(); moment_flush(); }
 
-// Hook do agendador (fase 2): só mostra na tela inicial, sem outro momento
-// aberto e sem rebuild pendente (que fecharia o overlay).
+// Hook do agendador: mostra sobre qualquer conteúdo do shell, sem outro
+// momento aberto e sem troca pendente (uma troca de estado limparia o overlay).
 static bool moment_hook(int slot, int win, int thr) {
-  if (g_mo.scrim || g_state != ST_MAIN || g_dirty) return false;
+  if (g_mo.scrim || app_state() != ST_SHELL || app_state_pending()) return false;
   show_moment(slot, win, thr);
   return true;
 }
@@ -1628,6 +1598,7 @@ static void show_moment(int slot, int win, int thr) {
 
   lv_obj_t *hint = mklabel(s, TRS("toque para fechar", "tap to close"), &lv_font_montserrat_12, C_FAINT);
   lv_obj_set_pos(hint, 352, 296);
+  overlay_restack();                          // incidente continua por cima
 }
 
 // Anima o momento (chamado a cada frame do loop enquanto o overlay existe).
@@ -1816,11 +1787,13 @@ static void show_incident() {
   lv_obj_set_size(ok, 140, 44);
   lv_obj_align(ok, LV_ALIGN_BOTTOM_LEFT, TX + (TW - 140) / 2, 0);
   lv_obj_add_event_cb(ok, incident_dismiss_cb, LV_EVENT_CLICKED, NULL);
+  overlay_restack();
 }
 
-// Abre/fecha o dialog conforme a ultima leitura do status.claude.com.
+// Abre/fecha o dialog conforme a ultima leitura do status.claude.com. Aparece
+// sobre qualquer conteúdo do shell (Technical Plan §5).
 static void incident_sync() {
-  if (g_state != ST_MAIN) return;
+  if (app_state() != ST_SHELL) return;
   bool any = g_status.ok &&
              !(g_status.haikuUp && g_status.sonnetUp && g_status.opusUp && g_status.fableUp);
   if (!any) { g_incAck = false; g_incSev = g_incMask = 0xFF; incident_close(); return; }
@@ -1831,131 +1804,72 @@ static void incident_sync() {
   if (!g_incAck && !g_incDlg) show_incident();
 }
 
-// Preenche todos os valores vindos do fetch (sem rebuild de tela).
-static void refresh_ui_values() {
-  if (g_state != ST_MAIN || !g_ui.tv) return;
-  update_tok_row();          // as colunas do tile 0 são atualizadas em dash_tick()
+// ---- Montagem e atualização de cada conteúdo (registrados no setup()) ----
+// Título de /agora: "THEP Usage v3.0 · N contas" (mockup-home.dc.html).
+static void home_build(lv_obj_t *p) {
+  char t[48], n[24];
+  int na = accountCount(g_accts);
+  if (na == 1) strlcpy(n, tr(T::FOOT_ACCT_ONE), sizeof(n));
+  else snprintf(n, sizeof(n), tr(T::FOOT_ACCT_FMT), na);
+  snprintf(t, sizeof(t), "THEP Usage v" FW_VERSION " \xC2\xB7 %s", n);
+  shell_set_title(t);
+  build_tile_agora(p);
+  home_cols_update();
+  update_tok_row();
+  incident_sync();
+  moment_flush();                             // momento guardado durante outra tela
+}
+static void home_refresh() {
+  home_cols_update();
+  update_tok_row();
+  incident_sync();
+}
+static void home_tick() {
+  home_cols_update();
+  update_tok_row();
+}
 
-  // Modelos: chips de sonda
+static void models_chips_update() {
   for (int i = 0; i < NMODELS; i++) {
     if (!g_ui.mChip[i]) continue;
     char txt[16]; uint32_t col;
     model_chip(i, txt, sizeof(txt), &col);
     set_chip(g_ui.mChip[i], txt, col);
     lv_obj_update_layout(g_ui.mChip[i]);
-    static const int CENTERS[NMODELS] = {60, 180, 300, 420};
-    lv_obj_set_x(g_ui.mChip[i], CENTERS[i] - lv_obj_get_width(g_ui.mChip[i]) / 2);
+    lv_obj_set_x(g_ui.mChip[i], MODEL_CX[i] - lv_obj_get_width(g_ui.mChip[i]) / 2);
   }
+}
+static void models_build(lv_obj_t *p) {
+  build_tile_models(p);
+  models_chips_update();
+}
+// Se algum mascote mudou de humor, o conteúdo é refeito; senão só os chips.
+static void models_refresh() {
+  for (int i = 0; i < g_mascN; i++) {
+    if (g_masc[i].mood != model_mood(i)) { shell_show(ContentId::MODELS); return; }
+  }
+  models_chips_update();
+}
 
-  incident_sync();
-
+// /janela e /ritmo mostram a conta em foco: o título é o rótulo dela e tocar
+// nele passa para a próxima conta (item 39).
+static void focus_title() {
+  int a = g_accts.active;
+  char t[ACCT_LBL_MAX + 8];
+  if (a >= 0 && a < ACCT_MAX && g_accts.label[a][0]) snprintf(t, sizeof(t), "%s", g_accts.label[a]);
+  else snprintf(t, sizeof(t), TRS("conta %d", "account %d"), a + 1);
+  shell_set_title(t);
+  if (accountCount(g_accts) > 1) shell_set_title_action(intent_focus_next);
+}
+static void trend_build(lv_obj_t *p) {
+  focus_title();
+  build_tile_trend(p);
   trend_redraw();
+}
+static void heat_build(lv_obj_t *p) {
+  focus_title();
+  build_tile_heat(p);
   heat_redraw();
-  dash_tick();
-}
-
-// Conta salva cuja última tentativa falhou (ou que não decifrou).
-static bool slot_failed(int s) {
-  if (!g_accts.used[s]) return false;
-  if (!acct[s].keyOk) return true;
-  FetchClass c = acct[s].lastClass;
-  return c != FC_NONE && c != FC_OK;
-}
-
-// Status do cabeçalho (fase 2, até sair na fase 3): "ok" ou "K com falha".
-static void set_hdr_status() {
-  if (!g_hdrStatus) return;
-  int k = 0;
-  for (int s = 0; s < ACCT_MAX; s++) if (slot_failed(s)) k++;
-  char buf[40];
-  if (k == 0) strlcpy(buf, "ok", sizeof(buf));
-  else snprintf(buf, sizeof(buf), TRS("%d com falha", "%d failing"), k);
-  lv_label_set_text(g_hdrStatus, buf);
-  lv_obj_set_style_text_color(g_hdrStatus, lv_color_hex(k ? C_BAD : C_MUTED), 0);
-}
-// Botão de refresh: só pede; o ciclo roda na net_task.
-static void refresh_cb(lv_event_t *e) { (void)e; scheduler_request_refresh(); }
-
-static void ui_main() {
-  lv_obj_t *scr = lv_screen_active();
-  lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
-
-  // Header: Clawd + logotipo (duplo toque em QUALQUER um = demo das animacoes),
-  // botao de ATUALIZAR visivel no centro, engrenagem grande a direita.
-  lv_obj_t *hIcon = lv_image_create(scr);
-  lv_image_set_src(hIcon, &img_clawd_sm);
-  lv_obj_set_pos(hIcon, 14, 8);
-  lv_obj_t *hWord = lv_image_create(scr);
-  lv_image_set_src(hWord, &img_wordmark);
-  lv_obj_set_pos(hWord, 66, 8);
-
-  lv_obj_t *logoSpot = lv_obj_create(scr);     // hotspot icone+nome (so demo)
-  lv_obj_set_pos(logoSpot, 6, 2); lv_obj_set_size(logoSpot, 128, 40);
-  lv_obj_set_style_bg_opa(logoSpot, 0, 0);
-  lv_obj_set_style_border_width(logoSpot, 0, 0);
-  lv_obj_clear_flag(logoSpot, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(logoSpot, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(logoSpot, [](lv_event_t *e) {
-    (void)e;
-    static uint32_t lastClick = 0;             // duplo clique manual (9.2 nao tem nativo)
-    static int di = 0;
-    uint32_t now = millis();
-    if (now - lastClick < 450) {
-      static const int T[4] = {25, 50, 70, 100};
-      show_moment(g_accts.active, (di / 4) % 2, T[di % 4]);
-      di++;
-      lastClick = 0;
-    } else {
-      lastClick = now;
-    }
-  }, LV_EVENT_CLICKED, NULL);
-
-  // botao de atualizar no centro do header (acao explicita; a busca e bloqueante)
-  lv_obj_t *ref = mkbtn(scr, LV_SYMBOL_REFRESH, &lv_font_montserrat_20, C_SURFACE2, C_ACCENT);
-  lv_obj_set_size(ref, 56, 40);
-  lv_obj_set_ext_click_area(ref, 10);
-  lv_obj_align(ref, LV_ALIGN_TOP_MID, 0, 2);
-  lv_obj_add_event_cb(ref, refresh_cb, LV_EVENT_CLICKED, NULL);
-
-  g_hdrStatus = mklabel(scr, "", &lv_font_montserrat_12, C_MUTED);
-  lv_obj_align(g_hdrStatus, LV_ALIGN_TOP_RIGHT, -92, 16);
-
-  lv_obj_t *gear = mkbtn(scr, LV_SYMBOL_SETTINGS, &lv_font_montserrat_22, C_SURFACE2, C_TEXT);
-  lv_obj_set_size(gear, 78, 40);
-  lv_obj_set_ext_click_area(gear, 16);
-  lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -6, 2);
-  lv_obj_add_event_cb(gear, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_SETTINGS);
-
-  // Telas (swipe horizontal)
-  g_ui.tv = lv_tileview_create(scr);
-  lv_obj_set_pos(g_ui.tv, 0, 46);
-  lv_obj_set_size(g_ui.tv, 480, 250);
-  lv_obj_set_style_bg_opa(g_ui.tv, 0, 0);
-  lv_obj_set_style_border_width(g_ui.tv, 0, 0);
-  lv_obj_set_scrollbar_mode(g_ui.tv, LV_SCROLLBAR_MODE_OFF);
-  for (int i = 0; i < NTILES; i++) {
-    g_ui.tile[i] = lv_tileview_add_tile(g_ui.tv, i, 0, LV_DIR_HOR);
-    tile_setup(g_ui.tile[i]);
-  }
-  build_tile_agora(g_ui.tile[0]);
-  build_tile_models(g_ui.tile[1]);
-  build_tile_trend(g_ui.tile[2]);
-  build_tile_heat(g_ui.tile[3]);
-  lv_obj_add_event_cb(g_ui.tv, on_tile_changed, LV_EVENT_VALUE_CHANGED, NULL);
-
-  // Dots (objetos; o ativo vira pílula)
-  for (int i = 0; i < NTILES; i++) {
-    g_ui.dots[i] = lv_obj_create(scr);
-    lv_obj_set_size(g_ui.dots[i], 8, 8);
-    lv_obj_set_style_radius(g_ui.dots[i], 4, 0);
-    lv_obj_set_style_bg_color(g_ui.dots[i], lv_color_hex(C_BORDER), 0);
-    lv_obj_set_style_border_width(g_ui.dots[i], 0, 0);
-    lv_obj_clear_flag(g_ui.dots[i], LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(g_ui.dots[i], LV_ALIGN_BOTTOM_MID, (int)((i - (NTILES - 1) / 2.0f) * 18), -4);
-  }
-
-  refresh_ui_values();
-  on_tile_changed(NULL);
 }
 
 // ============================================================
@@ -1963,22 +1877,23 @@ static void ui_main() {
 // ============================================================
 static bool g_wipeArmed = false;
 static lv_obj_t *g_briLbl = nullptr, *g_wipeLbl = nullptr, *g_pollLbl = nullptr,
-                *g_tzLbl = nullptr, *g_slideLbl = nullptr;
+                *g_tzLbl = nullptr;
 static const int POLL_OPTS[4] = {30, 60, 120, 300};
 static const int TZ_OPTS[] = {-3, -4, -5, -6, -7, -8, -2, -1, 0, 1, 2, 3};
 #define NTZ ((int)(sizeof(TZ_OPTS) / sizeof(TZ_OPTS[0])))
 
 static int g_acctDelArmed = -1;
+static bool g_acctKeepArm = false;   // a próxima troca de conteúdo mantém g_acctDelArmed
 
 static void settings_action_cb(lv_event_t *e) {
   int act = (int)(intptr_t)lv_event_get_user_data(e);
   switch (act) {
-    case 0: scheduler_request_refresh(); request_state(ST_MAIN); break;   // atualizar
-    case 1: g_onboarding = false; request_state(ST_WIFI); break;
+    case 0: intent_refresh(); break;                   // atualizar
+    case 1: g_onboarding = false; shell_show(ContentId::WIFI); break;
     case 2:                                            // trocar token
       g_tokenTargetSlot = g_accts.active;
       g_pendingLabel[0] = 0;
-      request_state(ST_TOKEN);
+      shell_show(ContentId::TOKEN);
       break;
     case 3:                                            // brilho
       g_briIdx = (g_briIdx + 1) % 3; g_prefs.putInt("bri", g_briIdx); apply_brightness();
@@ -2000,7 +1915,6 @@ static void settings_action_cb(lv_event_t *e) {
         request_state(ST_WIFI);
       }
       break;
-    case 5: request_state(ST_MAIN); break;             // voltar
     case 6: {                                          // intervalo de atualização
       int idx = 0;
       for (int i = 0; i < 4; i++) if (POLL_OPTS[i] == g_pollSec) idx = i;
@@ -2030,33 +1944,18 @@ static void settings_action_cb(lv_event_t *e) {
       }
       break;
     }
-    case 8: {                                          // slideshow: off -> 5 -> 10 -> 15 -> 30 -> off
-      static const int SL[5] = {0, 5, 10, 15, 30};
-      int idx = 0;
-      for (int i = 0; i < 5; i++) if (SL[i] == g_slideSec) idx = i;
-      g_slideSec = SL[(idx + 1) % 5];
-      g_prefs.putInt("slide", g_slideSec);
-      if (g_slideLbl) {
-        char m[48];
-        if (g_slideSec) snprintf(m, sizeof(m), LV_SYMBOL_PLAY "  Slideshow: %ds", g_slideSec);
-        else            snprintf(m, sizeof(m), "%s", TRS(LV_SYMBOL_PLAY "  Slideshow: desligado",
-                                                         LV_SYMBOL_PLAY "  Slideshow: off"));
-        lv_label_set_text(g_slideLbl, m);
-      }
-      break;
-    }
     case 9:                                            // idioma / language
       g_lang ^= 1;
       g_prefs.putInt("lang", g_lang);
-      request_state(ST_SETTINGS);                      // redesenha tudo no novo idioma
+      shell_show(ContentId::SETTINGS);                 // redesenha no novo idioma
       break;
-    case 10: request_state(ST_ABOUT); break;           // sobre / about
-    case 11: g_acctDelArmed = -1; request_state(ST_ACCOUNTS); break;
+    case 10: shell_show(ContentId::ABOUT); break;      // sobre / about
+    case 11: g_acctDelArmed = -1; shell_show(ContentId::ACCOUNTS); break;
   }
 }
 static void add_setting_row(lv_obj_t *p, const char *txt, int act, uint32_t fg, lv_obj_t **out) {
   lv_obj_t *b = lv_button_create(p);
-  lv_obj_set_size(b, 444, 44);
+  lv_obj_set_size(b, lv_pct(100), 44);
   lv_obj_set_style_bg_color(b, lv_color_hex(C_SURFACE), 0);
   lv_obj_set_style_radius(b, 12, 0);
   lv_obj_set_style_shadow_width(b, 0, 0);
@@ -2065,23 +1964,11 @@ static void add_setting_row(lv_obj_t *p, const char *txt, int act, uint32_t fg, 
   lv_obj_add_event_cb(b, settings_action_cb, LV_EVENT_CLICKED, (void *)(intptr_t)act);
   if (out) *out = l;
 }
-static void ui_settings() {
-  lv_obj_t *scr = lv_screen_active();
-  g_wipeArmed = false;
-  lv_obj_t *title = mklabel(scr, TRS("Ajustes", "Settings"), &lv_font_montserrat_20, C_TEXT);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
-
-  lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                       &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-  lv_obj_set_size(bk, 100, 32);
-  lv_obj_set_ext_click_area(bk, 6);
-  lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_MAIN);
-
-  // lista rolável
-  lv_obj_t *lst = lv_obj_create(scr);
-  lv_obj_set_pos(lst, 8, 44);
-  lv_obj_set_size(lst, 464, 268);
+// Lista rolável que ocupa o painel inteiro (/ajustes e /contas).
+static lv_obj_t *content_list(lv_obj_t *p) {
+  lv_obj_t *lst = lv_obj_create(p);
+  lv_obj_set_pos(lst, 0, 0);
+  lv_obj_set_size(lst, SHELL_CONTENT_W, SHELL_CONTENT_H);
   lv_obj_set_style_bg_opa(lst, 0, 0);
   lv_obj_set_style_border_width(lst, 0, 0);
   lv_obj_set_style_pad_all(lst, 0, 0);
@@ -2089,6 +1976,12 @@ static void ui_settings() {
   lv_obj_set_flex_flow(lst, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_scroll_dir(lst, LV_DIR_VER);
   lv_obj_set_scrollbar_mode(lst, LV_SCROLLBAR_MODE_AUTO);
+  return lst;
+}
+
+static void ui_settings(lv_obj_t *p) {
+  g_wipeArmed = false;
+  lv_obj_t *lst = content_list(p);
 
   const char *n[3] = {TRS("baixo", "low"), TRS("medio", "medium"), TRS("alto", "high")};
   char bri[40]; snprintf(bri, sizeof(bri), TRS(LV_SYMBOL_EYE_OPEN "  Brilho: %s",
@@ -2100,15 +1993,10 @@ static void ui_settings() {
                                                              LV_SYMBOL_LOOP "  Refresh: %dmin"), g_pollSec / 60);
   char tzTxt[40]; snprintf(tzTxt, sizeof(tzTxt), TRS(LV_SYMBOL_GPS "  Fuso: GMT%+d",
                                                      LV_SYMBOL_GPS "  Timezone: GMT%+d"), g_tzOffset);
-  char slideTxt[48];
-  if (g_slideSec) snprintf(slideTxt, sizeof(slideTxt), LV_SYMBOL_PLAY "  Slideshow: %ds", g_slideSec);
-  else            snprintf(slideTxt, sizeof(slideTxt), "%s", TRS(LV_SYMBOL_PLAY "  Slideshow: desligado",
-                                                                 LV_SYMBOL_PLAY "  Slideshow: off"));
 
   add_setting_row(lst, TRS(LV_SYMBOL_REFRESH "  Atualizar agora",
                            LV_SYMBOL_REFRESH "  Refresh now"),   0, C_TEXT, nullptr);
   add_setting_row(lst, pollTxt,                                  6, C_TEXT, &g_pollLbl);
-  add_setting_row(lst, slideTxt,                                 8, C_TEXT, &g_slideLbl);
   add_setting_row(lst, TRS(LV_SYMBOL_LIST "  Idioma: Portugues",
                            LV_SYMBOL_LIST "  Language: English"), 9, C_TEXT, nullptr);
   add_setting_row(lst, tzTxt,                                    7, C_TEXT, &g_tzLbl);
@@ -2132,10 +2020,7 @@ static void ui_settings() {
 static void acct_switch_cb(lv_event_t *e) {
   int slot = (int)(intptr_t)lv_event_get_user_data(e);
   g_acctDelArmed = -1;
-  if (slot == g_accts.active) return;
-  accountSetActive(g_prefs, g_accts, slot);
-  Serial.printf("[ACCT] foco -> slot %d (%s)\n", slot, g_accts.label[slot]);
-  request_state(ST_MAIN);
+  intent_focus(slot);                  // refaz /contas com o novo foco
 }
 // Remover (item 23): gen++ e token zerado; a fila não é esvaziada e a task não
 // é esperada — um resultado atrasado deste slot é descartado pelo gen.
@@ -2144,7 +2029,8 @@ static void acct_del_cb(lv_event_t *e) {
   if (accountCount(g_accts) <= 1) return;
   if (g_acctDelArmed != slot) {
     g_acctDelArmed = slot;
-    request_state(ST_ACCOUNTS);
+    g_acctKeepArm = true;              // o rebuild de /contas mostra o botão armado
+    shell_show(ContentId::ACCOUNTS);
     return;
   }
   g_acctDelArmed = -1;
@@ -2155,7 +2041,7 @@ static void acct_del_cb(lv_event_t *e) {
   LittleFS.remove(pth);
   acct_clear(slot);
   Serial.printf("[ACCT] slot %d removido (gen %u)\n", slot, (unsigned)acct[slot].gen);
-  request_state(ST_ACCOUNTS);
+  shell_show(ContentId::ACCOUNTS);
 }
 static void acct_add_cb(lv_event_t *e) {
   (void)e;
@@ -2163,7 +2049,7 @@ static void acct_add_cb(lv_event_t *e) {
   if (slot < 0) return;
   g_tokenTargetSlot = slot;
   g_pendingLabel[0] = 0;
-  request_state(ST_TOKEN);
+  shell_show(ContentId::TOKEN);
 }
 static int g_renameSlot = -1;
 static lv_obj_t *g_nameTa = nullptr;
@@ -2171,35 +2057,27 @@ static lv_obj_t *g_nameTa = nullptr;
 static void acct_edit_cb(lv_event_t *e) {
   g_renameSlot = (int)(intptr_t)lv_event_get_user_data(e);
   g_acctDelArmed = -1;
-  request_state(ST_ACCT_NAME);
+  shell_show(ContentId::ACCOUNT_NAME);
 }
 static void acct_name_kb_cb(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   if (code == LV_EVENT_READY) {
     accountSetLabel(g_prefs, g_accts, g_renameSlot, lv_textarea_get_text(g_nameTa));
-    request_state(ST_ACCOUNTS);
+    shell_show(ContentId::ACCOUNTS);
   } else if (code == LV_EVENT_CANCEL) {
-    request_state(ST_ACCOUNTS);
+    shell_show(ContentId::ACCOUNTS);
   }
 }
 
-static void ui_account_name() {
+// Conteúdo ACCOUNT_NAME: campo no painel, teclado na camada flutuante.
+static void ui_account_name(lv_obj_t *scr) {
   if (g_renameSlot < 0 || g_renameSlot >= ACCT_MAX || !g_accts.used[g_renameSlot]) {
-    request_state(ST_ACCOUNTS);
+    shell_show(ContentId::ACCOUNTS);
     return;
   }
-  lv_obj_t *scr = lv_screen_active();
-
   lv_obj_t *title = mklabel(scr, TRS("Renomear conta", "Rename account"),
-                            &lv_font_montserrat_20, C_TEXT);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
-
-  lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                       &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-  lv_obj_set_size(bk, 100, 32);
-  lv_obj_set_ext_click_area(bk, 6);
-  lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_ACCOUNTS);
+                            &lv_font_montserrat_16, C_TEXT);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
   g_nameTa = lv_textarea_create(scr);
   lv_textarea_set_one_line(g_nameTa, true);
@@ -2207,37 +2085,17 @@ static void ui_account_name() {
   lv_textarea_set_text(g_nameTa, g_accts.label[g_renameSlot]);
   lv_textarea_set_placeholder_text(g_nameTa, TRS("rotulo (ex.: Pessoal, Trabalho)",
                                                  "label (e.g. Personal, Work)"));
-  lv_obj_set_size(g_nameTa, 452, 44);
-  lv_obj_align(g_nameTa, LV_ALIGN_TOP_MID, 0, 52);
+  lv_obj_set_size(g_nameTa, SHELL_CONTENT_W, 44);
+  lv_obj_align(g_nameTa, LV_ALIGN_TOP_MID, 0, 24);
 
-  lv_obj_t *kb = lv_keyboard_create(scr);
+  lv_obj_t *kb = lv_keyboard_create(shell_float());
   lv_keyboard_set_textarea(kb, g_nameTa);
   lv_obj_add_event_cb(kb, acct_name_kb_cb, LV_EVENT_ALL, NULL);
 }
 
-static void ui_accounts() {
-  lv_obj_t *scr = lv_screen_active();
-
-  lv_obj_t *title = mklabel(scr, TRS("Contas", "Accounts"), &lv_font_montserrat_20, C_TEXT);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
-
-  lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                       &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-  lv_obj_set_size(bk, 100, 32);
-  lv_obj_set_ext_click_area(bk, 6);
-  lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_SETTINGS);
-
-  lv_obj_t *lst = lv_obj_create(scr);
-  lv_obj_set_pos(lst, 8, 44);
-  lv_obj_set_size(lst, 464, 240);
-  lv_obj_set_style_bg_opa(lst, 0, 0);
-  lv_obj_set_style_border_width(lst, 0, 0);
-  lv_obj_set_style_pad_all(lst, 0, 0);
-  lv_obj_set_style_pad_row(lst, 8, 0);
-  lv_obj_set_flex_flow(lst, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_scroll_dir(lst, LV_DIR_VER);
-  lv_obj_set_scrollbar_mode(lst, LV_SCROLLBAR_MODE_AUTO);
+// Linhas de 438 px: conta (318 ou 378) + editar (52) + apagar (52), gap de 8.
+static void ui_accounts(lv_obj_t *p) {
+  lv_obj_t *lst = content_list(p);
 
   bool canDelete = accountCount(g_accts) > 1;
   for (int i = 0; i < ACCT_MAX; i++) {
@@ -2245,11 +2103,11 @@ static void ui_accounts() {
     bool active = (i == g_accts.active);
 
     lv_obj_t *row = lv_obj_create(lst);
-    lv_obj_set_size(row, 444, 44);
+    lv_obj_set_size(row, SHELL_CONTENT_W, 44);
     no_box(row);
 
     lv_obj_t *b = lv_button_create(row);
-    lv_obj_set_size(b, canDelete ? 324 : 384, 44);
+    lv_obj_set_size(b, canDelete ? 318 : 378, 44);
     lv_obj_set_pos(b, 0, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(C_SURFACE), 0);
     lv_obj_set_style_radius(b, 12, 0);
@@ -2263,7 +2121,7 @@ static void ui_accounts() {
 
     lv_obj_t *ed = lv_button_create(row);
     lv_obj_set_size(ed, 52, 44);
-    lv_obj_set_pos(ed, canDelete ? 332 : 392, 0);
+    lv_obj_set_pos(ed, canDelete ? 326 : 386, 0);
     lv_obj_set_style_bg_color(ed, lv_color_hex(C_SURFACE2), 0);
     lv_obj_set_style_radius(ed, 12, 0);
     lv_obj_set_style_shadow_width(ed, 0, 0);
@@ -2274,7 +2132,7 @@ static void ui_accounts() {
       bool armed = (g_acctDelArmed == i);
       lv_obj_t *d = lv_button_create(row);
       lv_obj_set_size(d, 52, 44);
-      lv_obj_set_pos(d, 392, 0);
+      lv_obj_set_pos(d, 386, 0);
       lv_obj_set_style_bg_color(d, lv_color_hex(armed ? C_BAD : C_SURFACE2), 0);
       lv_obj_set_style_radius(d, 12, 0);
       lv_obj_set_style_shadow_width(d, 0, 0);
@@ -2286,7 +2144,7 @@ static void ui_accounts() {
 
   if (accountFirstFree(g_accts) >= 0) {
     lv_obj_t *add = lv_button_create(lst);
-    lv_obj_set_size(add, 444, 44);
+    lv_obj_set_size(add, SHELL_CONTENT_W, 44);
     lv_obj_set_style_bg_color(add, lv_color_hex(C_SURFACE2), 0);
     lv_obj_set_style_radius(add, 12, 0);
     lv_obj_set_style_shadow_width(add, 0, 0);
@@ -2297,26 +2155,20 @@ static void ui_accounts() {
     lv_obj_add_event_cb(add, acct_add_cb, LV_EVENT_CLICKED, NULL);
   }
 
-  lv_obj_t *hint = mklabel(scr, TRS("Todas as contas sao consultadas; a ativa tambem sonda os modelos.",
+  lv_obj_t *hint = mklabel(lst, TRS("Todas as contas sao consultadas; a ativa tambem sonda os modelos.",
                                     "All accounts are polled; the active one also probes the models."),
                            &lv_font_montserrat_12, C_FAINT);
-  lv_obj_set_width(hint, 452);
+  lv_obj_set_width(hint, SHELL_CONTENT_W);
   lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-  lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 14, -8);
 }
 
 // ============================================================
 // Tela: sobre / about
 // ============================================================
-static void ui_about() {
-  lv_obj_t *scr = lv_screen_active();
-
-  lv_obj_t *bk = mkbtn(scr, TRS(LV_SYMBOL_LEFT " Voltar", LV_SYMBOL_LEFT " Back"),
-                       &lv_font_montserrat_14, C_SURFACE2, C_MUTED);
-  lv_obj_set_size(bk, 100, 32);
-  lv_obj_set_ext_click_area(bk, 6);
-  lv_obj_align(bk, LV_ALIGN_TOP_RIGHT, -12, 6);
-  lv_obj_add_event_cb(bk, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ST_SETTINGS);
+// Conteúdo ABOUT: o texto passa da altura do painel, então ele rola.
+static void ui_about(lv_obj_t *scr) {
+  lv_obj_add_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(scr, LV_DIR_VER);
 
   lv_obj_t *mark = build_claude_mark(scr);
   lv_obj_align(mark, LV_ALIGN_TOP_MID, 0, 0);
@@ -2334,7 +2186,7 @@ static void ui_about() {
                                  "Real-time Claude Code usage meter: "
                                  "5-hour and weekly windows straight from the Anthropic API."),
                         &lv_font_montserrat_14, C_MUTED);
-  lv_obj_set_width(d, 420);
+  lv_obj_set_width(d, 410);
   lv_obj_set_style_text_align(d, LV_TEXT_ALIGN_CENTER, 0);
   lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
   lv_obj_align(d, LV_ALIGN_TOP_MID, 0, 146);
@@ -2342,6 +2194,9 @@ static void ui_about() {
   lv_obj_t *h = mklabel(scr, TRS("Tela: Guition JC4832W535 \xE2\x80\xA2 IPS 3.5\" 480x320 touch (AXS15231B)",
                                  "Display: Guition JC4832W535 \xE2\x80\xA2 3.5\" IPS 480x320 touch (AXS15231B)"),
                         &lv_font_montserrat_12, C_FAINT);
+  lv_obj_set_width(h, SHELL_CONTENT_W);
+  lv_label_set_long_mode(h, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(h, LV_ALIGN_TOP_MID, 0, 200);
 
   lv_obj_t *devCap = mklabel(scr, TRS("Desenvolvido por", "Developed by"), &lv_font_montserrat_12, C_FAINT);
@@ -2353,54 +2208,60 @@ static void ui_about() {
 }
 
 // ============================================================
-// Navegação genérica
+// Registro no app_state (item 25): telas cheias antes do desbloqueio e
+// conteúdos do shell. O app_state chama ui_reset() antes de limpar.
 // ============================================================
-static void nav_cb(lv_event_t *e) {
-  State s = (State)(intptr_t)lv_event_get_user_data(e);
-  request_state(s);
-}
-
-// ============================================================
-// Render do estado atual
-// ============================================================
-static void render_state() {
-  State prev = g_state;
-  g_state = g_pending;
-  // O servidor web não cai mais a cada tela (item 24): só o estado da
-  // validação do token fecha junto com a tela de token.
-  if (prev == ST_TOKEN && g_state != ST_TOKEN) web_token_reset();
-  // Tela de WiFi da sessão: sem jobs enquanto ela mexe no rádio.
-  if (prev == ST_WIFI && g_state != ST_WIFI) scheduler_resume();
-  if (g_state == ST_WIFI && session_unlocked()) scheduler_pause();
-  moment_close();                             // overlay vive em lv_layer_top
-  lv_obj_clean(lv_layer_top());
-  g_incDlg = nullptr;                         // dialog de incidente idem
-  // invalida ponteiros vivos antes de destruir a tela antiga
+static void ui_reset(bool full) {
   memset(&g_ui, 0, sizeof(g_ui));
   g_mascN = 0;
   g_pinDots = g_pinMsg = nullptr;
   g_tokMsg = nullptr;
   g_nameTa = nullptr;
-  g_hdrStatus = nullptr;
-  g_briLbl = g_wipeLbl = g_pollLbl = g_tzLbl = g_slideLbl = nullptr;
-
-  lv_obj_clean(lv_screen_active());
-  lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(C_BG), 0);
-  lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_COVER, 0);
-
-  switch (g_state) {
-    case ST_PIN:
-    case ST_SETUP_PIN: ui_pin(); break;
-    case ST_WIFI:      ui_wifi(); break;
-    case ST_TOKEN:     ui_token(); break;
-    case ST_MAIN:      ui_main(); break;
-    case ST_SETTINGS:  ui_settings(); break;
-    case ST_ACCOUNTS:  ui_accounts(); break;
-    case ST_ACCT_NAME: ui_account_name(); break;
-    case ST_ABOUT:     ui_about(); break;
-    default: break;
+  wifi_list = wifi_ta = wifi_kb = wifi_status = nullptr;
+  g_wifiWaiting = false;
+  g_briLbl = g_wipeLbl = g_pollLbl = g_tzLbl = nullptr;
+  if (!g_acctKeepArm) g_acctDelArmed = -1;   // sair de /contas desarma o apagar
+  g_acctKeepArm = false;
+  if (full) {
+    moment_close();                           // overlay vive em lv_layer_top
+    g_incDlg = nullptr;                       // o app_state limpa o lv_layer_top
   }
-  if (g_state == ST_MAIN) moment_flush();     // momento guardado durante outra tela
+}
+
+static lv_obj_t *moment_obj() { return g_mo.scrim; }
+static lv_obj_t *incident_obj() { return g_incDlg; }
+
+// Telas cheias ainda no visual da v2.3 (fundo antigo) até o redesenho.
+static void screen_bg() { lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(C_BG), 0); }
+static void screen_pin_build() { screen_bg(); ui_pin(); }
+// Contagem do bloqueio por PIN errado. 250ms para o segundo virar sem atraso
+// visivel; o tick so reescreve o label quando o valor muda. So ST_PIN: o
+// setup de PIN nao tem tentativa nem bloqueio.
+static void screen_pin_tick() {
+  static uint32_t lastLock = 0;
+  if (millis() - lastLock > 250) { lastLock = millis(); pin_lock_tick(); }
+}
+static void screen_wifi_build() { screen_bg(); ui_wifi(lv_screen_active()); }
+static void screen_token_build() { screen_bg(); ui_token(lv_screen_active()); }
+
+static void register_ui() {
+  app_on_ui_reset(ui_reset);
+  shell_set_overlay_getters(moment_obj, incident_obj);
+  app_register_screen(ST_PIN,       {screen_pin_build, screen_pin_tick});
+  app_register_screen(ST_SETUP_PIN, {screen_pin_build, nullptr});
+  app_register_screen(ST_WIFI,      {screen_wifi_build, nullptr});
+  app_register_screen(ST_TOKEN,     {screen_token_build, nullptr});
+
+  app_register_content(ContentId::HOME,         {home_build, home_refresh, home_tick});
+  app_register_content(ContentId::MODELS,       {models_build, models_refresh, nullptr});
+  app_register_content(ContentId::TREND,        {trend_build, trend_redraw, nullptr});
+  app_register_content(ContentId::HEAT,         {heat_build, heat_redraw, nullptr});
+  app_register_content(ContentId::ACCOUNTS,     {ui_accounts, nullptr, nullptr});
+  app_register_content(ContentId::ACCOUNT_NAME, {ui_account_name, nullptr, nullptr});
+  app_register_content(ContentId::SETTINGS,     {ui_settings, nullptr, nullptr});
+  app_register_content(ContentId::ABOUT,        {ui_about, nullptr, nullptr});
+  app_register_content(ContentId::TOKEN,        {ui_token, nullptr, nullptr});
+  app_register_content(ContentId::WIFI,         {ui_wifi, nullptr, wifi_content_tick});
 }
 
 // ============================================================
@@ -2475,6 +2336,7 @@ void setup() {
   PollerHooks hooks = {incident_sync, on_validate_result, ensure_mdns};
   poller_set_hooks(hooks);
   scheduler_set_moment_hook(moment_hook);
+  register_ui();
 
   if (has_accounts()) {
     // Tenta WiFi cedo (em paralelo o usuário digita o PIN)
@@ -2487,21 +2349,6 @@ void setup() {
   }
 }
 
-// Chegou resultado da net_task com a tela inicial aberta: valores no lugar e,
-// se algum mascote mudou de humor, só o tile de modelos é refeito (um rebuild
-// da tela inteira fecharia o overlay de momento e voltaria ao tile 0).
-static void ui_apply_results() {
-  bool moodChanged = false;
-  for (int i = 0; i < g_mascN; i++) if (g_masc[i].mood != model_mood(i)) moodChanged = true;
-  if (moodChanged && g_ui.tile[1]) {
-    lv_obj_clean(g_ui.tile[1]);
-    g_mascN = 0;
-    memset(g_ui.mChip, 0, sizeof(g_ui.mChip));
-    build_tile_models(g_ui.tile[1]);
-  }
-  refresh_ui_values();
-}
-
 void loop() {
   // Ordem do item 2 (fase 2), em todos os estados, antes e depois do desbloqueio
   lv_timer_handler();
@@ -2509,36 +2356,16 @@ void loop() {
   bool changed = poller_apply_results();
   scheduler_tick();
   poller_check_stuck();
-  if (changed) g_uiDirty = true;
+  // Trocas de tela/conteúdo pendentes, refresh do conteúdo aberto, ponto e
+  // rodapé (1s), tick da tela cheia (ex.: contagem do bloqueio do PIN).
+  app_state_tick(changed);
 
-  if (g_dirty) {
-    g_dirty = false;
-    render_state();
-  }
-  if (g_uiDirty) {
-    g_uiDirty = false;
-    if (g_state == ST_MAIN) ui_apply_results();
-  }
-
-  // Tela de WiFi da sessão esperando a net_task terminar o job em andamento.
-  if (g_state == ST_WIFI && g_wifiWaiting && poller_idle()) request_state(ST_WIFI);
-
-  // Contagem do bloqueio por PIN errado. 250ms para o segundo virar sem atraso
-  // visivel; o tick so reescreve o label quando o valor muda. So ST_PIN: o
-  // setup de PIN nao tem tentativa nem bloqueio.
-  if (g_state == ST_PIN) {
-    static uint32_t lastLock = 0;
-    if (millis() - lastLock > 250) { lastLock = millis(); pin_lock_tick(); }
-  }
-
-  // Atualização viva: contadores (1s), mascotes,
-  // slideshow (5s, pausa 10s após qualquer toque)
-  if (g_state == ST_MAIN) {
+  if (app_state() == ST_SHELL) {
+    // Mascotes de /modelos (só existem com o conteúdo aberto; g_mascN zera na troca)
     uint32_t now = millis();
-    static uint32_t lastTick = 0, lastBob = 0, blinkAt = 0;
+    static uint32_t lastBob = 0, blinkAt = 0;
     static bool blinkClosed = false;
-    if (now - lastTick > 1000) { lastTick = now; dash_tick(); update_tok_row(); }
-    if (now - lastBob > 80) {                       // animação por humor
+    if (g_mascN > 0 && now - lastBob > 80) {        // animação por humor
       lastBob = now;
       float ph = now / 600.0f;
       for (int i = 0; i < g_mascN; i++) {
@@ -2556,7 +2383,7 @@ void loop() {
       }
     }
     uint32_t bp = blinkClosed ? 150 : 3000;
-    if (now - blinkAt > bp) {                        // piscar (só quem está ok)
+    if (g_mascN > 0 && now - blinkAt > bp) {         // piscar (só quem está ok)
       blinkAt = now; blinkClosed = !blinkClosed;
       for (int i = 0; i < g_mascN; i++) {
         if (g_masc[i].mood != 1) continue;
@@ -2566,12 +2393,6 @@ void loop() {
           else             lv_obj_add_flag(g_masc[i].lid[k], LV_OBJ_FLAG_HIDDEN);
         }
       }
-    }
-    if (g_slideSec > 0 && g_ui.tv && !g_mo.scrim && !g_incDlg &&
-        now - g_lastTouchMs > 10000 && now - g_lastSlideMs > (uint32_t)g_slideSec * 1000) {
-      g_lastSlideMs = now;
-      int next = (g_curTile + 1) % NTILES;
-      lv_tileview_set_tile_by_index(g_ui.tv, next, 0, LV_ANIM_ON);
     }
 
     // Momento de limiar aberto (o agendador decide quando abrir: moment_flush)

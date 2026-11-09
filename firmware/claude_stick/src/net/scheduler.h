@@ -26,8 +26,9 @@ void scheduler_resume();
 // mostra no fim do ciclo, ou quando o overlay aberto fechar.
 void scheduler_offer_moment(int slot, ThrHit hit);
 void moment_flush();
-// show devolve false se não pode mostrar agora (já há momento aberto, ou a
-// tela não é a inicial); o momento fica guardado até o próximo flush.
+// show devolve false se não pode mostrar agora (já há momento aberto, fora do
+// shell ou com troca de tela pendente); o momento fica guardado até o próximo
+// flush.
 void scheduler_set_moment_hook(bool (*show)(int slot, int win, int thr));
 
 // configTime com o fuso de Ajustes (g_tzOffset).

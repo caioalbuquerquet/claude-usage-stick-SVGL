@@ -84,7 +84,7 @@
 #define LV_USE_LINE         1
 #define LV_USE_ARC          1
 #define LV_USE_SPINNER      1
-#define LV_USE_TILEVIEW     1
+#define LV_USE_TILEVIEW     0   /* fase 3: shell + menu no lugar do tileview */
 #define LV_USE_CHART        1
 
 #endif /*LV_CONF_H*/
