@@ -231,21 +231,22 @@ def shell(title, dot=C_OK, menu_open=False, accounts=2, failed=0, poll="2min", c
     c.rect((tx, ty + 3, tx + tw, ty + FB13.line_height - 3), fill=C_BG)
     c.text_top(tx + 6, ty, title, FB13, C_TITLE)
     fits("título do painel", title, FB13, 464 - 30 - 84)
-    # rodapé: "N contas · K ✗ │ ↻ 2min │ 14:32" (sem pássaro nem "thep")
+    # rodapé em 13 px: "N contas · K ✗ │ ↻ 2min" à esquerda e o relógio na
+    # borda direita (sem pássaro nem "thep"), como em shell.cpp
     c.rect((0, H - 20, W - 1, H - 1), fill=C_STATUSBAR)
     acct = "1 conta" if accounts == 1 else f"{accounts} contas"
     if failed:
         acct += f" · {failed} ✗"
-    base = H - 20 + 10 + 4
+    base = H - 20 + 10 + 5
     x = 10
-    for part, col in ((acct, C_TEXT), ("│", C_UNLIT), ("↻", C_DIM), (poll, C_TEXT),
-                      ("│", C_UNLIT), (clock, C_TEXT)):
+    for part, col in ((acct, C_TEXT), ("│", C_UNLIT), ("↻", C_DIM), (poll, C_TEXT)):
         pad = 2 if part == "│" else 0
         x += pad
         if part == "↻":
             x += c.refresh_icon(x, base, col) + 5
             continue
-        x += c.text(x, base, part, F11, col) + pad + 5
+        x += c.text(x, base, part, F13, col) + pad + 5
+    c.text(W - 10 - F13.w(clock), base, clock, F13, C_TEXT)
     return c
 
 

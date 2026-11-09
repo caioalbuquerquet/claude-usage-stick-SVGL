@@ -90,7 +90,7 @@ void title_cb(lv_event_t* e) {
 }
 
 lv_obj_t* footer_sep(lv_obj_t* p) {
-    lv_obj_t* l = label(p, "\xE2\x94\x82", theme_font(FONT_11), C_UNLIT);   // │
+    lv_obj_t* l = label(p, "\xE2\x94\x82", theme_font(FONT_13), C_UNLIT);   // │
     lv_obj_set_style_pad_hor(l, 2, 0);
     return l;
 }
@@ -184,15 +184,22 @@ void build_footer() {
     lv_obj_set_flex_align(f, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_remove_flag(f, LV_OBJ_FLAG_CLICKABLE);
 
-    const lv_font_t* f11 = theme_font(FONT_11);
-    // Pássaro e "thep" saíram do rodapé (pedido do dono): o rodapé começa
-    // direto na contagem de contas.
-    s_footAcct = label(f, "", f11, C_TEXT);
+    // Rodapé em 13 px (pedido do dono). Pássaro e "thep" saíram: começa direto
+    // na contagem de contas.
+    const lv_font_t* f13 = theme_font(FONT_13);
+    s_footAcct = label(f, "", f13, C_TEXT);
     footer_sep(f);
-    label(f, LV_SYMBOL_REFRESH, f11, C_DIM);          // ↻ pela Montserrat 14 (fallback)
-    s_footPoll = label(f, "", f11, C_TEXT);
-    footer_sep(f);
-    s_footClock = label(f, "--:--", f11, C_TEXT);
+    label(f, LV_SYMBOL_REFRESH, f13, C_DIM);          // ↻ pela Montserrat 14 (fallback)
+    s_footPoll = label(f, "", f13, C_TEXT);
+    // O relógio fica na borda DIREITA: com a tela girada 270°, a borda direita da
+    // paisagem são as primeiras linhas nativas, e o envio em faixas sempre começa
+    // na linha 0. Na esquerda, a troca de minuto mandava ~459 das 480 linhas;
+    // na direita manda só ~50.
+    lv_obj_t* spacer = lv_obj_create(f);
+    bare(spacer);
+    lv_obj_set_height(spacer, 1);
+    lv_obj_set_flex_grow(spacer, 1);
+    s_footClock = label(f, "--:--", f13, C_TEXT);
 }
 
 }  // namespace
