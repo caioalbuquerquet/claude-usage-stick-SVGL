@@ -89,3 +89,28 @@ comparados com `firmware/claude_stick/`, `firmware/bringup/` e `tools/`. Só lis
 As seções "Screens" e "Settings" não citam funções nem arquivos. Vale adicionar links como
 `model_chip()`, `ui_settings()`, `incident_sync()` e `TZ_OPTS` em `claude_stick.ino`. Assim um
 drift report futuro acha o código sem precisar de grep.
+
+## Situação na v3 (2026-11-09)
+
+Itens fechados pela reescrita dos READMEs para a v3 (item 46) e pelo código da v3. Cada linha diz
+onde ficou a correção.
+
+| Item | Situação |
+|---|---|
+| Barra de refresh clicável | Fechado. A `refBar` saiu na v3 (shell + menu); o README descreve `↻ Atualizar agora` no menu e em `/ajustes`. |
+| Pílulas de status dos modelos | Fechado. `/modelos` virou lista em texto (`model_status_text`, `src/logic/classify.cpp`); o README lista `ok · 0.9s`, `limitado`, `AUTH`, `NET`, `erro <código>`, `n/d` (só 404) e `—` (nunca sondado). |
+| Ordem dos Ajustes | Fechado. O README segue `screen_settings_build()` (`src/ui/screen_settings.cpp`): Atualizar agora → Atualizar a cada → Idioma → Fuso → Brilho → WiFi → Contas → Trocar token → Sobre → Apagar tudo. O slideshow saiu. |
+| Fuso "GMT±N" | Fechado. O README lista as opções de `TZ_OPTS` (GMT−3…−8, −2, −1, 0, +1…+3; padrão GMT−3). |
+| Bloqueio por PIN sem limite | Fechado. O README diz 60 s dobrando até 1 hora (`LOCKOUT_BASE_SEC`, teto de 3600 s no `.ino`). |
+| Derivação da chave | Fechado. O README cita 10.000 rodadas de SHA-256 com o MAC do chip como salt. |
+| `STATUS_POLL_SEC` sem uso | Fechado no código: o agendador manda um job `STATUS` global a cada `STATUS_POLL_SEC` (300 s) (`src/net/scheduler.cpp`). O README documenta os 5 min. |
+| Headers lidos | Fechado. A lista do README inclui `5h-status`, `7d-status` e `unified-reset`. |
+| Escopo do token bridge (glob) | Fechado no código: glob recursivo em `tools/token_bridge.py` (commit b0e4e80), coberto por `tools/test_token_bridge.py`. O README diz "todas as subpastas de `projects/`". |
+| Payload do bridge | Fechado. O README documenta `in` (entrada + criação de cache), `out`, `cache`, `sessions` e a opção `--host`, além de `--config-dir` e do contrato novo (`?account=`, 404). |
+| Nome da placa | Explicado, não resolvido. O README diz que JC4832W535 (fontes do firmware) e JC3248W535C (vendedores, STL) se referem à mesma placa. Qual dos dois é o nome oficial não foi conferido. |
+| Mockups "match v2.3" | Fechado. `tools/gen_mockups.py` foi reescrito para a v3 com as fontes e imagens do firmware (commit 3930f62); o chip `GRAVE` usa a mesma cor do firmware (`C_BAD_INK`); `mock-agora.png` e `mock-contas.png` foram apagados. A linha do `status.claude.com` voltou a fazer parte de `/modelos` na v3, então aparecer no mockup está certo. |
+| Tabela de partições | Fechado. O README explica `app0`/`app1` de 3 MB, sem OTA, com o `app1` sem uso, e por que a tabela não muda. |
+| Layout do repositório | Fechado. O README lista `src/` por pasta, `firmware/tests/`, `firmware/README.md`, os arquivos do `bringup/`, `gen_fonts.sh`, `gen_hermes_assets.py`, `test_token_bridge.py` e `flash.sh`. `clawd_dead.h`, `logo_assets.h` e os geradores do Clawd foram removidos (commit 318e207). |
+| Auto-close dos momentos | Fechado. O README diz 4,6 s (`DURATION_MS`, `src/ui/overlay_moment.cpp`). |
+| README.pt-BR.md | Fechado junto: o pt-BR foi reescrito com o mesmo conteúdo do EN. |
+| Sugestão de citar funções e arquivos | Atendida em parte: a seção "Where to tweak" / "Onde mexer" cita os arquivos e funções de cada parte. |
