@@ -1,8 +1,8 @@
 #pragma once
 // Estado da aplicação, navegação entre conteúdos do shell e intenções
-// (item 25). Fora do shell, só antes do desbloqueio: PIN, definição de PIN,
-// WiFi e token do onboarding (telas cheias). Depois do desbloqueio a tela é o
-// shell (ui/shell.h) e só o conteúdo do painel troca.
+// (item 25). Fora do shell, só antes do desbloqueio: abertura, PIN, definição
+// de PIN, WiFi e token do onboarding (telas cheias). Depois do desbloqueio a
+// tela é o shell (ui/shell.h) e só o conteúdo do painel troca.
 //
 // As telas se registram aqui (app_register_screen / app_register_content);
 // app_state não conhece o código delas. Toda troca de tela ou de conteúdo é
@@ -13,6 +13,7 @@
 
 enum AppState : uint8_t {
   ST_BOOT,
+  ST_SPLASH,     // tela de abertura (ui/screen_splash), antes do PIN ou do onboarding
   ST_PIN,
   ST_SETUP_PIN,
   ST_WIFI,       // onboarding (na sessão o WiFi é o conteúdo WIFI)

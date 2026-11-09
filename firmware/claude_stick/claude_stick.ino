@@ -45,6 +45,7 @@
 #include "ui/shell.h"
 #include "ui/overlay_menu.h"
 #include "ui/screens.h"
+#include "ui/screen_splash.h"
 #include "hw/frame_stats.h"
 #include "logic/rot270.h"
 #include "ui/i18n.h"
@@ -561,6 +562,7 @@ static void home_refresh() {
 }
 
 static void ui_reset(bool full) {
+  screen_splash_reset();
   screen_home_reset();
   screen_models_reset();
   screen_trend_reset();
@@ -587,6 +589,7 @@ static void pin_screen_tick() {
 static void register_ui() {
   app_on_ui_reset(ui_reset);
   shell_set_overlay_getters(moment_obj, incident_obj);
+  app_register_screen(ST_SPLASH,    {screen_splash_build, nullptr});
   app_register_screen(ST_PIN,       {pin_screen_build, pin_screen_tick});
   app_register_screen(ST_SETUP_PIN, {pin_screen_build, nullptr});
   app_register_screen(ST_WIFI,      {screen_wifi_full, nullptr});
@@ -665,6 +668,12 @@ void setup() {
   lv_indev_set_read_cb(indev, touch_read_cb);
 
   load_persisted();
+  register_ui();
+  // Abertura parada já no primeiro quadro (sem tela preta enquanto o boot
+  // carrega LittleFS, NVS e o WiFi); a animação de 4 s começa no fim do setup().
+  request_state(ST_SPLASH);
+  app_state_tick(false);
+  lv_refr_now(NULL);
   apply_brightness();
   Serial.printf("[BOOT] fw %s reset_reason=%d\n", FW_VERSION, (int)esp_reset_reason());
   if (g_prefs.isKey("lastReset")) {             // motivo gravado por poller_check_stuck()
@@ -685,16 +694,17 @@ void setup() {
   PollerHooks hooks = {incident_sync, on_validate_result, ensure_mdns};
   poller_set_hooks(hooks);
   scheduler_set_moment_hook(show_moment);
-  register_ui();
 
+  // O autoConnect bloqueia o loop(): a animação da abertura só começa depois
+  // dele, e é a abertura que pede a primeira tela ao terminar.
   if (has_accounts()) {
     // Tenta WiFi cedo (em paralelo o usuário digita o PIN)
     g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS);
-    request_state(ST_PIN);
+    screen_splash_start(ST_PIN);
   } else {
     g_onboarding = true;
     // Se já há WiFi salvo (reboot no meio do onboarding), pula direto p/ o token
-    request_state(g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS) ? ST_TOKEN : ST_WIFI);
+    screen_splash_start(g_wifi.autoConnect(WIFI_CONNECT_TIMEOUT_MS) ? ST_TOKEN : ST_WIFI);
   }
 }
 
