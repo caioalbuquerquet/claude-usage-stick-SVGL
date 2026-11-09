@@ -246,3 +246,45 @@ TEST(projection_ponta_a_ponta) {
     projection_text(p, 0, 0, 60, b, sizeof(b));
     CHECK_STR(b, "\xE2\x9C\x97 esgota 12:30 \xC2\xB7 30m");
 }
+
+// Bug do aparelho (foto do dono): conta a 97% na 5h mostrava "Uso estavel" e
+// "5h: reseta em agora". A leitura guardada tinha o reset da 5h no passado
+// (janela anterior): com resetEpoch <= now a regra 5 nunca dá ESGOTA (eta >
+// resetEpoch sempre) e a v2.3 caía em "Uso estavel". Agora é JANELA_PASSOU.
+TEST(projection_reset_ja_passou) {
+    // consumo forte (1 %/min): com o reset no futuro seria ESGOTA
+    Ring r;
+    r.push(NOW - 1800, 67);
+    r.push(NOW - 600, 87);
+    CHECK_EQ(r.proj(97, NOW + 3600).st, ProjResult::ESGOTA);
+
+    // mesmo histórico, reset 2 min atrás
+    ProjResult p = r.proj(97, NOW - 120);
+    CHECK_EQ(p.st, ProjResult::JANELA_PASSOU);
+    CHECK_EQ(p.etaEpoch, NOW - 120);
+    CHECK_EQ(p.minutes, 0);
+    char b[64];
+    projection_text(p, 0, 0, 60, b, sizeof(b));
+    CHECK_STR(b, "\xE2\x80\x94 janela reiniciou");
+    projection_text(p, 1, 0, 60, b, sizeof(b));
+    CHECK_STR(b, "\xE2\x80\x94 window reset");
+    projection_text(p, 0, 0, 20, b, sizeof(b));        // cabe no layout de 3
+    CHECK_STR(b, "\xE2\x80\x94 janela reiniciou");
+
+    // reset exatamente agora também já passou; vale antes da regra 2 (esgotada)
+    CHECK_EQ(r.proj(97, NOW).st, ProjResult::JANELA_PASSOU);
+    CHECK_EQ(r.proj(100, NOW - 1).st, ProjResult::JANELA_PASSOU);
+    // sem relógio ou sem reset continua SEM_DADOS (regra 1 antes da 1b)
+    CHECK_EQ(r.proj(97, NOW - 120, 999999999UL).st, ProjResult::SEM_DADOS);
+
+    // reset no futuro e uso parado a 97%: não esgota até o reset, pelo design
+    // (regra 6). O texto é "✓ não esgota · ~97%", não "Uso estavel".
+    Ring f;
+    f.push(NOW - 1800, 97);
+    f.push(NOW - 600, 97);
+    ProjResult q = f.proj(97, NOW + 3600);
+    CHECK_EQ(q.st, ProjResult::OK_ATE_RESET);
+    CHECK_EQ(q.pctAtReset, 97);
+    projection_text(q, 0, 0, 60, b, sizeof(b));
+    CHECK_STR(b, "\xE2\x9C\x93 n\xC3\xA3o esgota \xC2\xB7 ~97%");
+}

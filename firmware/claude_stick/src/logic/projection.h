@@ -6,7 +6,10 @@
 #include "logic/sample.h"
 
 struct ProjResult {
-    enum State { SEM_DADOS, OK_ATE_RESET, ESGOTA, ESGOTADA } st;
+    // JANELA_PASSOU: o reset da 5h já passou (resetEpoch <= now). A % e as
+    // amostras são da janela que acabou, então não há o que projetar até a
+    // próxima leitura trazer o reset novo.
+    enum State { SEM_DADOS, OK_ATE_RESET, ESGOTA, ESGOTADA, JANELA_PASSOU } st;
     uint32_t etaEpoch;   // ESGOTA: hora em que esgota; demais: resetEpoch (0 em SEM_DADOS)
     int minutes;         // minutos de now até etaEpoch (nunca negativo)
     int pctAtReset;      // OK_ATE_RESET: % prevista no reset (0..100)
@@ -16,6 +19,8 @@ struct ProjResult {
 // hist: ring buffer de HIST_MAX amostras; n: amostras válidas; head: próxima
 // posição de escrita. A amostra i (0 = mais antiga) fica em
 // (head - n + i + 2*HIST_MAX) % HIST_MAX.
+// Regra 1b (depois da 1, antes da 2): resetEpoch <= now -> JANELA_PASSOU, com
+// etaEpoch = resetEpoch e minutes = 0.
 ProjResult projection(const Sample* hist, int n, int head, float pctNow,
                       uint32_t resetEpoch, uint32_t now);
 

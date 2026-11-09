@@ -19,6 +19,14 @@ ProjResult projection(const Sample* hist, int n, int head, float pctNow,
     if (now < 1000000000UL || resetEpoch == 0) return r;
     const uint32_t ws = resetEpoch - 5 * 3600;
 
+    // 1b. o reset já passou: a leitura é da janela anterior (inclusive uma
+    // "esgotada"), e sem ela a regra 5 nunca daria ESGOTA (eta > resetEpoch).
+    if (resetEpoch <= now) {
+        r.st = ProjResult::JANELA_PASSOU;
+        r.etaEpoch = resetEpoch;
+        return r;
+    }
+
     // 2. já esgotada (antes da contagem de amostras)
     if (pctNow >= 99.5f) {
         r.st = ProjResult::ESGOTADA;
@@ -112,6 +120,10 @@ void projection_text(const ProjResult& r, uint8_t lang, int32_t tzOffsetSec,
         }
         case ProjResult::ESGOTADA:
             snprintf(b, sizeof(b), "%s", lang ? "\xE2\x9C\x97 exhausted" : "\xE2\x9C\x97 esgotada");
+            break;
+        case ProjResult::JANELA_PASSOU:
+            snprintf(b, sizeof(b), "%s", lang ? "\xE2\x80\x94 window reset"
+                                              : "\xE2\x80\x94 janela reiniciou");
             break;
         case ProjResult::SEM_DADOS:
         default:

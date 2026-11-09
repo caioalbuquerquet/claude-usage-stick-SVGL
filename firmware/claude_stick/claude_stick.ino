@@ -1393,6 +1393,13 @@ static void trend_redraw() {
     lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
     return;
   }
+  if (pr.st == ProjResult::JANELA_PASSOU) {   // leitura da janela anterior
+    lv_line_set_points(g_ui.trProj, g_trProjPts, 0);
+    lv_label_set_text(g_ui.trCap, TRS("Janela reiniciou \xE2\x80\xA2 aguardando a proxima leitura",
+                                      "Window reset \xE2\x80\xA2 waiting for the next reading"));
+    lv_obj_set_style_text_color(g_ui.trCap, lv_color_hex(C_MUTED), 0);
+    return;
+  }
 
   char e[32];
   if (pr.st == ProjResult::ESGOTADA) {
