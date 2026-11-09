@@ -115,18 +115,9 @@ static int g_heatMode = 3;                // 0=hoje 1=7d 2=30d 3=tudo (config, N
 
 // ---- Histórico / heatmap: src/model/history.{h,cpp} ----
 
-// ---- Mascotes Clawd oficiais (pagina de modelos; humor por status) ----
-// mood: 0=nunca sondado, 1=ok, 2=limitado(429), 3=erro/incidente, 4=n/d(404)
-struct Mascot { lv_obj_t *cont, *img, *lid[2], *drop; int baseY, mood; };
-static Mascot g_masc[NMODELS];
-static int g_mascN = 0;
-static lv_point_precise_t g_mXPts[NMODELS][4][2];   // olhos em X (mood 3)
-
 // ---- Ponteiros dos conteúdos do shell (zerados a cada troca de conteúdo) ----
 #define NSEG 18                       // segmentos do medidor do momento
 struct DashUI {
-  // modelos
-  lv_obj_t *mChip[NMODELS];
   // tendência da janela 5h (linhas custom)
   lv_obj_t *trHist, *trProj, *trDot, *trCap, *trT0, *trT1;
   // ritmo por hora
@@ -883,137 +874,11 @@ static lv_obj_t *rrect(lv_obj_t *p, int x, int y, int w, int h, int r, uint32_t 
   lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
   return o;
 }
-// humor do modelo: sonda real (HTTP) + incidentes do status.claude.com
-static int model_mood(int i) {
-  bool inc = (i == 0) ? g_status.haikuUp : (i == 1) ? g_status.sonnetUp
-           : (i == 2) ? g_status.opusUp  : g_status.fableUp;
-  int c = g_models[i].pr.code;
-  if (!inc) return 3;
-  if (c == 0) return 0;
-  if (c == 200) return 1;
-  if (c == 429) return 2;
-  if (c == 404) return 4;
-  return 3;                              // rede / 5xx / auth
-}
-
-// adereço pixel que identifica cada modelo (flutuando sobre a cabeça)
-static void build_accessory(lv_obj_t *c, int model) {
-  switch (model) {
-    case 0:                              // Haiku: raio
-      rrect(c, 46, 0, 8, 7, 1, C_WARN);
-      rrect(c, 41, 5, 8, 7, 1, C_WARN);
-      rrect(c, 46, 10, 8, 7, 1, C_WARN);
-      break;
-    case 1:                              // Sonnet: nota musical
-      rrect(c, 50, 0, 10, 4, 1, 0x7DD3FC);
-      rrect(c, 50, 0, 4, 13, 1, 0x7DD3FC);
-      rrect(c, 44, 10, 8, 7, 3, 0x7DD3FC);
-      break;
-    case 2:                              // Opus: coroa
-      rrect(c, 30, 4, 7, 8, 1, C_WARN);
-      rrect(c, 41, 1, 7, 11, 1, C_WARN);
-      rrect(c, 52, 4, 7, 8, 1, C_WARN);
-      rrect(c, 30, 12, 29, 6, 1, C_WARN);
-      break;
-    case 3:                              // Fable: faisca (estrela 4 pontas)
-      rrect(c, 41, 0, 6, 17, 2, 0xC4B5FD);
-      rrect(c, 36, 6, 16, 6, 2, 0xC4B5FD);
-      break;
-  }
-}
-
-// Mascote da pagina de modelos: Clawd oficial + humor + adereço.
-static void build_model_mascot(lv_obj_t *parent, int cx, int i) {
-  if (g_mascN >= NMODELS) return;
-  int mood = model_mood(i);
-  int baseY = 14;
-  lv_obj_t *c = lv_obj_create(parent);
-  lv_obj_set_pos(c, cx - 44, baseY); lv_obj_set_size(c, 88, 80);
-  lv_obj_set_style_bg_opa(c, 0, 0); lv_obj_set_style_border_width(c, 0, 0);
-  lv_obj_set_style_pad_all(c, 0, 0); lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t *img = lv_image_create(c);
-  lv_image_set_src(img, &img_clawd_md);
-  lv_obj_set_pos(img, 0, 20);
-
-  build_accessory(c, i);
-
-  const int ex[2] = {CLAWD_MD_EYE0_X, CLAWD_MD_EYE1_X};
-  const int ey = CLAWD_MD_EYE0_Y + 20, ew = CLAWD_MD_EYE0_W, eh = CLAWD_MD_EYE0_H;
-
-  Mascot &m = g_masc[g_mascN];
-  m.cont = c; m.img = img; m.baseY = baseY; m.mood = mood;
-  m.lid[0] = m.lid[1] = nullptr; m.drop = nullptr;
-
-  if (mood == 1) {                       // ok: pálpebras escondidas p/ piscar
-    for (int k = 0; k < 2; k++) {
-      m.lid[k] = rrect(c, ex[k] - 1, ey - 1, ew + 2, eh + 2, 1, C_ACCENT);
-      lv_obj_add_flag(m.lid[k], LV_OBJ_FLAG_HIDDEN);
-    }
-  } else if (mood == 2) {                // limitado: gota de suor
-    m.drop = rrect(c, 70, 24, 6, 10, 3, 0x7DD3FC);
-  } else if (mood == 3) {                // erro/incidente: cinza + olhos em X
-    lv_obj_set_style_image_recolor(img, lv_color_hex(0x6A6A74), 0);
-    lv_obj_set_style_image_recolor_opa(img, 190, 0);
-    lv_obj_set_y(img, 24);               // caidinho
-    for (int k = 0; k < 2; k++) {
-      g_mXPts[i][k * 2][0]     = { (lv_value_precise_t)(ex[k] - 2), (lv_value_precise_t)(ey + 2) };
-      g_mXPts[i][k * 2][1]     = { (lv_value_precise_t)(ex[k] + ew + 2), (lv_value_precise_t)(ey + eh + 6) };
-      g_mXPts[i][k * 2 + 1][0] = { (lv_value_precise_t)(ex[k] + ew + 2), (lv_value_precise_t)(ey + 2) };
-      g_mXPts[i][k * 2 + 1][1] = { (lv_value_precise_t)(ex[k] - 2), (lv_value_precise_t)(ey + eh + 6) };
-      for (int l = 0; l < 2; l++) {
-        lv_obj_t *ln = lv_line_create(c);
-        lv_line_set_points(ln, g_mXPts[i][k * 2 + l], 2);
-        lv_obj_set_style_line_width(ln, 3, 0);
-        lv_obj_set_style_line_color(ln, lv_color_hex(C_BAD), 0);
-        lv_obj_set_style_line_rounded(ln, true, 0);
-      }
-    }
-  } else if (mood == 4) {                // n/d p/ o plano: dormindo
-    lv_obj_set_style_image_recolor(img, lv_color_hex(0x6A6A74), 0);
-    lv_obj_set_style_image_recolor_opa(img, 170, 0);
-    for (int k = 0; k < 2; k++)
-      m.lid[k] = rrect(c, ex[k] - 1, ey + eh / 2, ew + 2, eh / 2 + 1, 1, 0x8A8A94);
-    lv_obj_set_style_opa(c, 180, 0);
-  } else {                               // nunca sondado: apagadinho
-    lv_obj_set_style_opa(c, 140, 0);
-  }
-  g_mascN++;
-}
-
-static void model_chip(int i, char *out, size_t sz, uint32_t *col) {
-  int c = g_models[i].pr.code;
-  if (c == 0)             { strlcpy(out, "--", sz);        *col = C_MUTED; }
-  else if (c == 200)      { snprintf(out, sz, "OK %.1fs", g_models[i].pr.ms / 1000.0f); *col = C_OK; }
-  else if (c == 429)      { strlcpy(out, TRS("LIMITADO", "LIMITED"), sz); *col = C_WARN; }
-  else if (c == 404)      { strlcpy(out, TRS("N/D", "N/A"), sz); *col = C_MUTED; }
-  else if (c == 401 || c == 403) { strlcpy(out, "AUTH", sz); *col = C_BAD; }
-  else if (c < 0)         { strlcpy(out, TRS("REDE", "NET"), sz); *col = C_BAD; }
-  else                    { snprintf(out, sz, TRS("ERRO %d", "ERR %d"), c); *col = C_BAD; }
-}
 
 // ============================================================
 // Conteúdos do shell com o visual da v2.3 (fase 3, onda 2). Cada um monta
 // dentro do painel (438 x 214); o novo visual vem com src/ui/screen_*.
 // ============================================================
-// /modelos: Clawd oficial por modelo (humor animado) + sonda real.
-// Incidentes nao aparecem aqui: viram o dialog sobre o shell.
-static const int MODEL_CX[NMODELS] = {54, 164, 274, 384};   // centros no painel de 438 px
-static void build_tile_models(lv_obj_t *t) {
-  const int *CENTERS = MODEL_CX;
-  for (int i = 0; i < NMODELS; i++) {
-    build_model_mascot(t, CENTERS[i], i);
-    lv_obj_t *n = mklabel(t, g_models[i].name, &lv_font_montserrat_16,
-                          model_mood(i) == 1 ? C_TEXT : C_MUTED);
-    lv_obj_set_width(n, 104);
-    lv_obj_set_style_text_align(n, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(n, CENTERS[i] - 52, 98);
-    g_ui.mChip[i] = mkchip(t, 0, 122);
-  }
-  tstatic(t, TRS("sonda real na API \xE2\x80\xA2 1 modelo por ciclo",
-                 "live API probe \xE2\x80\xA2 1 model per cycle"),
-          &lv_font_montserrat_12, C_FAINT, 0, 176);
-}
 // /janela: histórico + projeção pontilhada até esgotar.
 #define TR_X0 12
 #define TR_Y0 10
@@ -1624,28 +1489,6 @@ static void home_refresh() {
   incident_sync();
 }
 
-static void models_chips_update() {
-  for (int i = 0; i < NMODELS; i++) {
-    if (!g_ui.mChip[i]) continue;
-    char txt[16]; uint32_t col;
-    model_chip(i, txt, sizeof(txt), &col);
-    set_chip(g_ui.mChip[i], txt, col);
-    lv_obj_update_layout(g_ui.mChip[i]);
-    lv_obj_set_x(g_ui.mChip[i], MODEL_CX[i] - lv_obj_get_width(g_ui.mChip[i]) / 2);
-  }
-}
-static void models_build(lv_obj_t *p) {
-  build_tile_models(p);
-  models_chips_update();
-}
-// Se algum mascote mudou de humor, o conteúdo é refeito; senão só os chips.
-static void models_refresh() {
-  for (int i = 0; i < g_mascN; i++) {
-    if (g_masc[i].mood != model_mood(i)) { shell_show(ContentId::MODELS); return; }
-  }
-  models_chips_update();
-}
-
 // /janela e /ritmo mostram a conta em foco: o título é o rótulo dela e tocar
 // nele passa para a próxima conta (item 39).
 static void focus_title() {
@@ -2009,7 +1852,7 @@ static void ui_about(lv_obj_t *scr) {
 static void ui_reset(bool full) {
   memset(&g_ui, 0, sizeof(g_ui));
   screen_home_reset();
-  g_mascN = 0;
+  screen_models_reset();
   g_pinDots = g_pinMsg = nullptr;
   g_tokMsg = nullptr;
   g_nameTa = nullptr;
@@ -2049,7 +1892,7 @@ static void register_ui() {
   app_register_screen(ST_TOKEN,     {screen_token_build, nullptr});
 
   app_register_content(ContentId::HOME,         {home_build, home_refresh, screen_home_tick});
-  app_register_content(ContentId::MODELS,       {models_build, models_refresh, nullptr});
+  app_register_content(ContentId::MODELS,       {screen_models_build, screen_models_refresh, nullptr});
   app_register_content(ContentId::TREND,        {trend_build, trend_redraw, nullptr});
   app_register_content(ContentId::HEAT,         {heat_build, heat_redraw, nullptr});
   app_register_content(ContentId::ACCOUNTS,     {ui_accounts, nullptr, nullptr});
@@ -2157,40 +2000,6 @@ void loop() {
   app_state_tick(changed);
 
   if (app_state() == ST_SHELL) {
-    // Mascotes de /modelos (só existem com o conteúdo aberto; g_mascN zera na troca)
-    uint32_t now = millis();
-    static uint32_t lastBob = 0, blinkAt = 0;
-    static bool blinkClosed = false;
-    if (g_mascN > 0 && now - lastBob > 80) {        // animação por humor
-      lastBob = now;
-      float ph = now / 600.0f;
-      for (int i = 0; i < g_mascN; i++) {
-        if (!g_masc[i].cont) continue;
-        if (g_masc[i].mood == 1)                    // ok: bob alegre
-          lv_obj_set_y(g_masc[i].cont, g_masc[i].baseY + (int)(2.0f * sinf(ph + i * 0.9f) - 1.0f));
-        else if (g_masc[i].mood == 2) {             // limitado: bob curto + suor
-          lv_obj_set_y(g_masc[i].cont, g_masc[i].baseY + (int)(1.2f * sinf(ph * 0.6f + i)));
-          if (g_masc[i].drop) {
-            uint32_t cyc = (now + i * 300) % 900;
-            lv_obj_set_y(g_masc[i].drop, 24 + (int)(cyc * 22 / 900));
-            lv_obj_set_style_bg_opa(g_masc[i].drop, (lv_opa_t)(255 - cyc * 190 / 900), 0);
-          }
-        }
-      }
-    }
-    uint32_t bp = blinkClosed ? 150 : 3000;
-    if (g_mascN > 0 && now - blinkAt > bp) {         // piscar (só quem está ok)
-      blinkAt = now; blinkClosed = !blinkClosed;
-      for (int i = 0; i < g_mascN; i++) {
-        if (g_masc[i].mood != 1) continue;
-        for (int k = 0; k < 2; k++) {
-          if (!g_masc[i].lid[k]) continue;
-          if (blinkClosed) lv_obj_clear_flag(g_masc[i].lid[k], LV_OBJ_FLAG_HIDDEN);
-          else             lv_obj_add_flag(g_masc[i].lid[k], LV_OBJ_FLAG_HIDDEN);
-        }
-      }
-    }
-
     // Momento de limiar aberto (o agendador decide quando abrir: moment_flush)
     if (g_mo.scrim) moment_tick();
   }
