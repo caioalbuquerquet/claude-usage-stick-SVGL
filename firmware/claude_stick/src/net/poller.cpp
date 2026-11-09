@@ -167,6 +167,7 @@ void net_task(void*) {
         r.slot = job.slot;
         r.gen = job.gen;
         r.modelIdx = job.modelIdx;
+        r.cycle = job.cycle;
         r.netIdx = -1;
         r.cls = FC_NONE;
 

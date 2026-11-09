@@ -11,6 +11,7 @@
 #include "net/poller.h"
 #include "net/token_store.h"
 #include "hw/frame_stats.h"
+#include "logic/cycle.h"
 
 // ficam no .ino (regra das fases 0 a 2)
 extern int g_pollSec;
@@ -23,7 +24,8 @@ bool s_started = false;
 bool s_paused = false;
 bool s_timeInit = false;
 bool s_clockLogged = false;
-int s_cycleOutstanding = 0;
+CycleTracker s_cyc = {};        // ciclo aberto e resultados que faltam
+bool s_reconnecting = false;     // um RECONNECT (do boot ou de um ciclo) está em voo
 uint32_t s_cycleStartMs = 0;
 uint32_t s_nextCycleMs = 0;
 uint32_t s_cycleEndEpoch = 0;
@@ -59,8 +61,8 @@ void set_class_all(FetchClass c) {
         if (g_accts.used[s] && acct[s].keyOk) acct[s].lastClass = c;
 }
 
-void begin_cycle(int n, const char* what) {
-    s_cycleOutstanding = n;
+void begin_cycle(uint16_t id, int n, const char* what) {
+    cycle_begin(s_cyc, id, n);
     s_cycleStartMs = millis();
     s_cycleNo++;
     Serial.printf("[CYC] #%u start n=%d %s\n", (unsigned)s_cycleNo, n, what);
@@ -108,6 +110,23 @@ void end_cycle(const NetResult& r) {
     if (r.type == JOB_RECONNECT && r.cls == FC_OK) s_nextCycleMs = millis();   // consulta já
 }
 
+// Copia as redes salvas para o token_store e enfileira um RECONNECT com o id
+// de ciclo `cycle` (0 = fora de ciclo). Único lugar que monta esse job.
+bool enqueue_reconnect(uint16_t cycle) {
+    WiFiManager::SavedNet nets[MAX_SAVED_NETWORKS];
+    int n = g_wifi.copySaved(nets);
+    token_store_set_reconnect(nets, n);
+    memset(nets, 0, sizeof(nets));
+    NetJob j = {};
+    j.type = JOB_RECONNECT;
+    j.slot = -1;
+    j.modelIdx = -1;
+    j.cycle = cycle;
+    if (!poller_enqueue(j)) return false;
+    s_reconnecting = true;
+    return true;
+}
+
 }  // namespace
 
 void scheduler_apply_tz() { configTime(g_tzOffset * 3600, 0, NTP_SERVER_1, NTP_SERVER_2); }
@@ -120,8 +139,14 @@ void scheduler_start() {
     Serial.println("[CYC] unlock");
 }
 
+bool scheduler_request_reconnect() {
+    if (g_wifi.getSavedCount() <= 0 || s_reconnecting) return false;
+    return enqueue_reconnect(0);
+}
+
 void scheduler_stop() {
     s_started = false;
+    cycle_cancel(s_cyc);                 // resultados em voo não contam mais
     s_firstCycleRunning = false;
     s_best.slot = -1;
 }
@@ -133,22 +158,17 @@ void scheduler_tick() {
         s_clockLogged = true;
         Serial.printf("[NTP] relogio pronto (uptime %us)\n", (unsigned)(millis() / 1000));
     }
-    if (!s_started || s_paused || s_cycleOutstanding > 0) return;
+    if (!s_started || s_paused || cycle_running(s_cyc)) return;
+    // RECONNECT do boot ainda em voo: o resultado decide (FC_OK consulta já).
+    if (s_reconnecting) return;
     if (!due(s_nextCycleMs)) return;
 
+    const uint16_t id = cycle_next_id(s_cyc);
     if (!WiFi.isConnected()) {
         s_noClockSinceMs = 0;
         set_class_all(FC_NOWIFI);
-        WiFiManager::SavedNet nets[MAX_SAVED_NETWORKS];
-        int n = g_wifi.copySaved(nets);
-        token_store_set_reconnect(nets, n);
-        memset(nets, 0, sizeof(nets));
-        NetJob j = {};
-        j.type = JOB_RECONNECT;
-        j.slot = -1;
-        j.modelIdx = -1;
-        if (poller_enqueue(j)) {
-            begin_cycle(1, "reconnect (sem WiFi)");
+        if (enqueue_reconnect(id)) {
+            begin_cycle(id, 1, "reconnect (sem WiFi)");
         } else {
             s_nextCycleMs = millis() + interval_ms();
         }
@@ -186,6 +206,7 @@ void scheduler_tick() {
         j.slot = (int8_t)s;
         j.gen = (uint16_t)acct[s].gen;
         j.modelIdx = -1;
+        j.cycle = id;
         strlcpy(j.model, PROBE_MODEL, sizeof(j.model));
         bool probe = (s == g_accts.active);
         if (probe) {
@@ -207,6 +228,7 @@ void scheduler_tick() {
         j.type = JOB_STATUS;
         j.slot = -1;
         j.modelIdx = -1;
+        j.cycle = id;
         if (poller_enqueue(j)) {
             s_lastStatusMs = millis();
             s_statusEver = true;
@@ -220,18 +242,24 @@ void scheduler_tick() {
     }
     char what[80];
     snprintf(what, sizeof(what), "(usage=%d status=%d) %s", nUsage, status ? 1 : 0, probeTxt);
-    begin_cycle(n, what);
+    begin_cycle(id, n, what);
 }
 
 void scheduler_on_result(const NetResult& r) {
-    if (r.type == JOB_VALIDATE) return;          // fora do ciclo
-    if (s_cycleOutstanding <= 0) return;
-    if (--s_cycleOutstanding > 0) return;
-    end_cycle(r);
+    if (r.type == JOB_RECONNECT) {
+        s_reconnecting = false;
+        // RECONNECT do boot (fora de ciclo) que conectou: se já desbloqueou,
+        // o primeiro ciclo de consulta começa já (antes disso o
+        // scheduler_start() já agenda para o próximo tick).
+        if (r.cycle == 0 && r.cls == FC_OK) s_nextCycleMs = millis();
+    }
+    // Só conta o que o ciclo aberto mandou: VALIDATE e o RECONNECT do boot
+    // vêm com cycle 0, e um resultado de ciclo cancelado tem outro id.
+    if (cycle_on_result(s_cyc, r.cycle)) end_cycle(r);
 }
 
 void scheduler_request_refresh() {
-    if (s_cycleOutstanding == 0) {
+    if (!cycle_running(s_cyc)) {
         s_nextCycleMs = millis();
         Serial.println("[CYC] atualizar agora");
     }
@@ -266,4 +294,4 @@ uint32_t scheduler_last_cycle_ms() { return s_lastCycleMs; }
 uint32_t scheduler_cycles_over_interval() { return s_cyclesOver; }
 uint32_t scheduler_cycle_end_epoch() { return s_cycleEndEpoch; }
 bool scheduler_first_cycle_running() { return s_firstCycleRunning; }
-bool scheduler_cycle_running() { return s_cycleOutstanding > 0; }
+bool scheduler_cycle_running() { return cycle_running(s_cyc); }

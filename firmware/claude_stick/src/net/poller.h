@@ -24,11 +24,14 @@ enum JobType : uint8_t { JOB_USAGE, JOB_STATUS, JOB_VALIDATE, JOB_RECONNECT };
 //              índice em g_models[] quando é a sonda da conta em foco, -1 senão.
 //   VALIDATE:  slot = g_tokenTargetSlot (só log), gen = web_token_seq().
 //   STATUS, RECONNECT: slot = -1, gen = 0.
+// cycle: id do ciclo do agendador que mandou o job (logic/cycle.h); 0 = fora
+// de ciclo (VALIDATE, RECONNECT do boot). Volta igual no NetResult.
 struct NetJob {
     JobType type;
     int8_t slot;
     uint16_t gen;
     int8_t modelIdx;
+    uint16_t cycle;
     char model[48];
 };
 
@@ -48,6 +51,7 @@ struct NetResult {
     int probeHttp;
     uint16_t probeMs;
     int8_t netIdx;
+    uint16_t cycle;
     union {
         UsageData u;     // USAGE, VALIDATE
         ModelStatus s;   // STATUS
