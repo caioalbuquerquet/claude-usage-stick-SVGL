@@ -17,6 +17,7 @@
 #include "ui/screens.h"
 #include "ui/shell.h"
 #include "ui/theme.h"
+#include "ui/widgets.h"
 #include "ui/i18n.h"
 #include "ui/assets_thep.h"
 #include "app/app_state.h"
@@ -105,34 +106,9 @@ uint8_t used_mask() {
   return m;
 }
 
-int ascent(const lv_font_t* f) { return f->line_height - f->base_line; }
-int text_w(const char* t, const lv_font_t* f) {
-  return lv_text_get_width(t, (uint32_t)strlen(t), f, 0);
-}
-
-lv_obj_t* mk_label(lv_obj_t* p, const lv_font_t* f, uint32_t col, int x, int base,
-                   const char* txt = "") {
-  lv_obj_t* l = lv_label_create(p);
-  lv_obj_set_style_text_font(l, f, 0);
-  lv_obj_set_style_text_color(l, lv_color_hex(col), 0);
-  lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
-  lv_label_set_text(l, txt);
-  lv_obj_set_pos(l, x, base - ascent(f));
-  return l;
-}
 // Alinhado à direita do pai (o LVGL refaz o x quando a largura muda).
 void align_right(lv_obj_t* o, const lv_font_t* f, int base) {
-  lv_obj_align(o, LV_ALIGN_TOP_RIGHT, 0, base - ascent(f));
-}
-
-void lbl_set(lv_obj_t* l, const char* t) {
-  if (l && strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
-}
-void lbl_color(lv_obj_t* l, uint32_t col) {
-  if (!l) return;
-  lv_color_t c = lv_color_hex(col);
-  if (!lv_color_eq(lv_obj_get_style_text_color(l, LV_PART_MAIN), c))
-    lv_obj_set_style_text_color(l, c, 0);
+  lv_obj_align(o, LV_ALIGN_TOP_RIGHT, 0, base - ui_ascent(f));
 }
 
 uint32_t hash_of(const char* s, uint32_t col) {
@@ -148,7 +124,7 @@ void spans_make(Spans& s, lv_obj_t* p, int n, const lv_font_t* f, int x, int bas
   lv_obj_remove_flag(s.g, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_text_font(s.g, f, 0);
   lv_spangroup_set_mode(s.g, LV_SPAN_MODE_EXPAND);
-  lv_obj_set_pos(s.g, x, base - ascent(f));
+  lv_obj_set_pos(s.g, x, base - ui_ascent(f));
   s.n = (uint8_t)(n > 4 ? 4 : n);
   for (int i = 0; i < s.n; i++) s.sp[i] = lv_spangroup_new_span(s.g);
 }
@@ -190,15 +166,6 @@ void kv_set(Spans& s, const char* key, const char* val, uint32_t col) {
   spans_set(s, 0, key, C_DIM);
   spans_set(s, 1, val, col);
   spans_commit(s);
-}
-
-// 1234 -> "1.2k", 2345678 -> "2.3M" (fmt_tok da v2.3)
-void fmt_tok(long long v, char* out, size_t sz) {
-  if (v >= 100000000LL)     snprintf(out, sz, "%lldM", v / 1000000LL);
-  else if (v >= 1000000LL)  snprintf(out, sz, "%.1fM", v / 1e6);
-  else if (v >= 10000LL)    snprintf(out, sz, "%lldk", v / 1000LL);
-  else if (v >= 1000LL)     snprintf(out, sz, "%.1fk", v / 1e3);
-  else                      snprintf(out, sz, "%lld", v);
 }
 
 void key_text(const Txt* k, char* out, size_t sz) {
@@ -250,7 +217,7 @@ void build_l1(Card& c, lv_obj_t* box) {
   lv_obj_remove_flag(bird, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_pos(bird, (150 - 124) / 2, 18);
   label_text(c.slot, S.labelMax, t, sizeof(t));
-  c.label = mk_label(box, fb, C_ACCENT, 0, 160, t);
+  c.label = ui_label(box, fb, C_ACCENT, 0, 160, t);
   lv_obj_set_width(c.label, 150);
   lv_obj_set_style_text_align(c.label, LV_TEXT_ALIGN_CENTER, 0);
   spans_make(c.mark, box, 2, f11, 0, 178);
@@ -260,16 +227,16 @@ void build_l1(Card& c, lv_obj_t* box) {
 
   // coluna direita: seções Janela 5h e Semana
   const int X = L1_COL_X;
-  mk_label(box, fb, C_ACCENT, X, 12, tr(T::CARD_SEC_5H));
-  c.pct = mk_label(box, fn, C_DIM, X, 56);
+  ui_label(box, fb, C_ACCENT, X, 12, tr(T::CARD_SEC_5H));
+  c.pct = ui_label(box, fn, C_DIM, X, 56);
   bar_make(c.bar5, box, f13, X, 76);
   spans_make(c.r5, box, 2, f11, X, 93);
-  mk_label(box, fb, C_ACCENT, X, 116, tr(T::CARD_SEC_WEEK));
-  c.wkPct = mk_label(box, fb, C_DIM, X, 134);
+  ui_label(box, fb, C_ACCENT, X, 116, tr(T::CARD_SEC_WEEK));
+  c.wkPct = ui_label(box, fb, C_DIM, X, 134);
   bar_make(c.bar7, box, f11, X + 44, 134);
   spans_make(c.r7, box, 2, f11, X, 151);
-  c.proj = mk_label(box, f11, C_DIM, X, 172);
-  c.tok = mk_label(box, f11, C_DIM, X, 190);
+  c.proj = ui_label(box, f11, C_DIM, X, 172);
+  c.tok = ui_label(box, f11, C_DIM, X, 190);
 }
 
 // Layouts 2 e 3: colunas com rótulo + marca, "5h", %, barra, reset, semana,
@@ -297,23 +264,23 @@ void build_cols(Card& c, lv_obj_t* box, LayoutKind L) {
   const int yProj  = two ? 196 : 148;
 
   label_text(c.slot, S.labelMax, t, sizeof(t));
-  c.label = mk_label(box, fb, C_ACCENT, 0, yLabel, t);
+  c.label = ui_label(box, fb, C_ACCENT, 0, yLabel, t);
   spans_make(c.mark, box, 1, ft, 0, yLabel);
   align_right(c.mark.g, ft, yLabel);
-  mk_label(box, ft, C_DIM, 0, y5h, "5h");
-  c.pct = mk_label(box, fn, C_DIM, 0, yPct);
+  ui_label(box, ft, C_DIM, 0, y5h, "5h");
+  c.pct = ui_label(box, fn, C_DIM, 0, yPct);
   bar_make(c.bar5, box, fbar, 0, yBar5);
   spans_make(c.r5, box, 2, ft, 0, yR5);
   key_text(S.wkKey, t, sizeof(t));
-  c.wkKey = mk_label(box, ft, C_DIM, 0, yWk, t);
-  s_wkKeyW = (int16_t)text_w(t, ft);
-  c.wkPct = mk_label(box, fb, C_DIM, s_wkKeyW, yWk);
+  c.wkKey = ui_label(box, ft, C_DIM, 0, yWk, t);
+  s_wkKeyW = (int16_t)ui_text_w(t, ft);
+  c.wkPct = ui_label(box, fb, C_DIM, s_wkKeyW, yWk);
   if (S.bar7Cells) {
     bar_make(c.bar7, box, ft, 0, yWk);
     align_right(c.bar7.g, ft, yWk);
   }
   spans_make(c.r7, box, 2, ft, 0, yR7);
-  c.proj = mk_label(box, ft, C_DIM, 0, yProj);
+  c.proj = ui_label(box, ft, C_DIM, 0, yProj);
 }
 
 // Layout 4 (2 x 2, 210 x 103): rótulo e "5h NN%" na mesma linha, barra,
@@ -326,19 +293,19 @@ void build_l4(Card& c, lv_obj_t* box) {
   char t[48];
 
   label_text(c.slot, S.labelMax, t, sizeof(t));
-  c.label = mk_label(box, fb, C_ACCENT, 0, 18, t);
-  c.pct = mk_label(box, fn, C_DIM, 0, 18);
+  c.label = ui_label(box, fb, C_ACCENT, 0, 18, t);
+  c.pct = ui_label(box, fn, C_DIM, 0, 18);
   align_right(c.pct, fn, 18);
-  c.key5 = mk_label(box, f11, C_DIM, 0, 18, "5h ");
-  s_key5W = (int16_t)text_w("5h ", f11);
+  c.key5 = ui_label(box, f11, C_DIM, 0, 18, "5h ");
+  s_key5W = (int16_t)ui_text_w("5h ", f11);
   bar_make(c.bar5, box, theme_font(S.bar5Font), 0, 40);
   key_text(S.wkKey, t, sizeof(t));
-  c.wkKey = mk_label(box, f11, C_DIM, 0, 60, t);
-  s_wkKeyW = (int16_t)text_w(t, f11);
-  c.wkPct = mk_label(box, fb, C_DIM, s_wkKeyW, 60);
+  c.wkKey = ui_label(box, f11, C_DIM, 0, 60, t);
+  s_wkKeyW = (int16_t)ui_text_w(t, f11);
+  c.wkPct = ui_label(box, fb, C_DIM, s_wkKeyW, 60);
   spans_make(c.r5, box, 2, f11, 0, 60);
   align_right(c.r5.g, f11, 60);
-  c.proj = mk_label(box, f11, C_DIM, 0, 82);
+  c.proj = ui_label(box, f11, C_DIM, 0, 82);
 }
 
 // ---- Valores ----
@@ -388,11 +355,11 @@ void card_update(Card& c, uint32_t now) {
   }
   if (show) snprintf(t, sizeof(t), "%d%%", (int)(u.h5 + 0.5f));
   else snprintf(t, sizeof(t), "%s", tr(T::CARD_NO_PCT));
-  lbl_set(c.pct, t);
-  lbl_color(c.pct, c5);
+  ui_set_text(c.pct, t);
+  ui_set_color(c.pct, c5);
   if (c.key5) {
     const lv_font_t* fn = theme_font_num(LAYOUT_4);
-    int x = S.cardW - text_w(t, fn) - s_key5W;
+    int x = S.cardW - ui_text_w(t, fn) - s_key5W;
     if (lv_obj_get_x(c.key5) != x) lv_obj_set_x(c.key5, x);
   }
   bar_set(c.bar5, show ? u.h5 : 0.0f, S.bar5Cells, c5);
@@ -408,8 +375,8 @@ void card_update(Card& c, uint32_t now) {
   uint32_t c7 = (show && !dim) ? level_color(level_for(u.d7)) : C_DIM;
   if (show) snprintf(t, sizeof(t), "%d%%", (int)(u.d7 + 0.5f));
   else snprintf(t, sizeof(t), "%s", tr(T::CARD_NO_PCT));
-  lbl_set(c.wkPct, t);
-  lbl_color(c.wkPct, c7);
+  ui_set_text(c.wkPct, t);
+  ui_set_color(c.wkPct, c7);
   if (S.bar7Cells) bar_set(c.bar7, show ? u.d7 : 0.0f, S.bar7Cells, c7);
   if (S.r7Key) {
     key_text(S.r7Key, key, sizeof(key));
@@ -450,21 +417,16 @@ void card_update(Card& c, uint32_t now) {
     }
   }
   fit_label(t, S.projMax, v, sizeof(v));
-  lbl_set(c.proj, v);
-  lbl_color(c.proj, pc);
+  ui_set_text(c.proj, v);
+  ui_set_color(c.proj, pc);
 
   // tokens do bridge (layout 1)
   if (c.tok) {
-    const TokenStats& tok = a.tok;
-    if (tok.atMs == 0 || millis() - tok.atMs > TOK_FRESH_MS) {
-      lbl_set(c.tok, "");
-    } else {
-      char in[24], out[24];
-      fmt_tok(tok.tin, in, sizeof(in));
-      fmt_tok(tok.tout, out, sizeof(out));
-      snprintf(t, sizeof(t), tr(T::CARD_TOK_FMT), in, out);
+    if (tok_text(a.tok, t, sizeof(t))) {
       fit_label(t, S.projMax, v, sizeof(v));
-      lbl_set(c.tok, v);
+      ui_set_text(c.tok, v);
+    } else {
+      ui_set_text(c.tok, "");
     }
   }
 }
